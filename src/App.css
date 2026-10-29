@@ -1,0 +1,297 @@
+
+:root {
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  color: #20352b;
+  background: #f4f7f4;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 8px;
+  padding: 11px 16px;
+  color: white;
+  background: #26734d;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+button:hover:not(:disabled) {
+  background: #1d5c3c;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.dashboard {
+  width: min(1120px, 100%);
+  margin: auto;
+  padding: 28px 20px 18px;
+}
+
+.hero {
+  background: #203f30;
+  color: white;
+  border-radius: 18px;
+  padding: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.hero h1 {
+  margin: 6px 0;
+  font-size: clamp(2rem, 5vw, 3rem);
+}
+
+.hero p {
+  margin-bottom: 0;
+  color: #d9e9dd;
+}
+
+.eyebrow,
+.batch-id {
+  font-size: 0.75rem;
+  letter-spacing: 1.2px;
+  font-weight: 700;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin: 22px 0;
+}
+
+.stat-card,
+.panel,
+.batch-card {
+  background: white;
+  border: 1px solid #e0e8e1;
+  border-radius: 14px;
+}
+
+.stat-card {
+  padding: 20px;
+  display: grid;
+  gap: 10px;
+}
+
+.stat-card span,
+.muted {
+  color: #718076;
+}
+
+.stat-card strong {
+  font-size: 1.8rem;
+}
+
+.critical-number {
+  color: #c34242;
+}
+
+.panel {
+  padding: 24px;
+  margin-bottom: 22px;
+}
+
+.panel h2 {
+  margin-top: 0;
+}
+
+.muted {
+  font-size: 0.9rem;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.form-grid label,
+.upload-form label {
+  display: grid;
+  gap: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+input,
+select {
+  width: 100%;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid #ccd8ce;
+  border-radius: 8px;
+  background: white;
+  color: #20352b;
+}
+
+input:focus,
+select:focus {
+  outline: 2px solid #9ac5a8;
+  border-color: #26734d;
+}
+
+.form-action {
+  display: flex;
+  align-items: end;
+}
+
+.notice {
+  overflow-wrap: anywhere;
+  background: #eef6ef;
+  color: #285b3c;
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 16px;
+}
+
+.error {
+  background: #fff0f0;
+  color: #a22d2d;
+}
+
+.section-heading,
+.batch-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.count-badge {
+  background: #edf4ee;
+  padding: 8px 12px;
+  border-radius: 20px;
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
+
+.inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.batch-card {
+  padding: 18px;
+  min-width: 0;
+}
+
+.batch-card h3 {
+  margin: 5px 0;
+  overflow-wrap: anywhere;
+}
+
+.batch-id {
+  color: #718076;
+  margin: 0;
+}
+
+.status {
+  background: #eaf4ec;
+  color: #26734d;
+  padding: 6px 9px;
+  border-radius: 20px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.status-critical {
+  background: #ffe8e6;
+  color: #bd3838;
+}
+
+.batch-details {
+  border-top: 1px solid #e8eee9;
+  margin-top: 14px;
+  padding-top: 8px;
+}
+
+.batch-details p {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.9rem;
+}
+
+.batch-details p span {
+  color: #718076;
+}
+
+.batch-details strong {
+  text-align: right;
+}
+
+.secondary-button {
+  background: #eaf2ec;
+  color: #285a3d;
+}
+
+.secondary-button:hover:not(:disabled) {
+  background: #dce9df;
+}
+
+.full-button {
+  width: 100%;
+}
+
+.document-missing {
+  margin-bottom: 0;
+}
+
+.upload-form {
+  display: grid;
+  gap: 18px;
+  max-width: 600px;
+}
+
+footer {
+  text-align: center;
+  color: #718076;
+  font-size: 0.85rem;
+  padding: 12px;
+}
+
+@media (max-width: 650px) {
+  .dashboard {
+    padding: 14px;
+  }
+
+  .hero {
+    padding: 23px;
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .stats,
+  .inventory-grid,
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .panel {
+    padding: 18px;
+  }
+}
