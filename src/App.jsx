@@ -43,8 +43,6 @@ const [productsError, setProductsError] = useState("");
 
 async function loadProducts() {
   try {
-    setProductsLoading(true);
-
     const data = await getProducts();
 
     setProducts(
