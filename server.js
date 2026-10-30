@@ -13,6 +13,7 @@ app.use(cors());
 app.use(express.json());
 
 const REGION = process.env.AWS_REGION || 'eu-north-1';
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 const ssmClient = new SSMClient({ region: REGION });
 const s3Client = new S3Client({ region: REGION });
@@ -81,25 +82,46 @@ function initCognitoVerifier() {
     });
     console.log('Cognito JWT verifier initialized successfully.');
   } else {
-    console.warn('Cognito parameters missing in SSM; operating in mock-auth mode only.');
+    console.warn('Cognito parameters missing in SSM; running in mock-auth mode only.');
   }
 }
 
-// ---------------- AUTHENTICATION & ROLE MIDDLEWARE ----------------
+// ---------------- HEALTH CHECK ENDPOINTS (P2: #20, #21) ----------------
+const healthHandler = async (req, res) => {
+  try {
+    const conn = await dbPool.getConnection();
+    await conn.ping();
+    conn.release();
+    res.json({
+      status: 'UP',
+      database: 'CONNECTED',
+      environment: process.env.NODE_ENV || 'development',
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    res.status(503).json({ status: 'DOWN', database: 'DISCONNECTED', error: err.message });
+  }
+};
+
+app.get('/health', healthHandler);
+app.get('/api/health', healthHandler);
+
+// ---------------- AUTHENTICATION & ROLE MIDDLEWARE (P0: #3) ----------------
 const authenticateUser = async (req, res, next) => {
   const authHeader = req.headers.authorization;
 
-  // Mode A: Valid Cognito Bearer Token
+  // Mode A: Cognito Token Validation
   if (authHeader && authHeader.startsWith('Bearer ') && jwtVerifier) {
     const token = authHeader.split(' ')[1];
     try {
       const payload = await jwtVerifier.verify(token);
-      const [rows] = await dbPool.query('SELECT * FROM users WHERE cognito_sub = ?', [payload.sub]);
+      req.tokenPayload = payload;
 
+      const [rows] = await dbPool.query('SELECT * FROM users WHERE cognito_sub = ?', [payload.sub]);
       if (rows.length === 0) {
         return res.status(401).json({
           success: false,
-          message: 'User authenticated with Cognito but not registered in database. Please call /api/users/sync.'
+          message: 'User authenticated with Cognito but not registered in FreshFarm database. Please sync profile.'
         });
       }
       req.user = rows[0];
@@ -109,17 +131,54 @@ const authenticateUser = async (req, res, next) => {
     }
   }
 
-  // Mode B: Mock Header Fallback (Preserves local tests and Person 1 mock flows)
-  const userId = req.headers['x-user-id'] || 1;
-  try {
-    const [rows] = await dbPool.query('SELECT * FROM users WHERE id = ?', [userId]);
-    if (rows.length === 0) {
-      return res.status(401).json({ success: false, message: 'Invalid user authentication' });
+  // Mode B: Mock Header - RESTRICTED TO NON-PRODUCTION (P0: #3)
+  if (!IS_PRODUCTION && req.headers['x-user-id']) {
+    const userId = req.headers['x-user-id'];
+    try {
+      const [rows] = await dbPool.query('SELECT * FROM users WHERE id = ?', [userId]);
+      if (rows.length === 0) {
+        return res.status(401).json({ success: false, message: 'Mock user ID not found' });
+      }
+      req.user = rows[0];
+      return next();
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
     }
-    req.user = rows[0];
+  }
+
+  // Fallback for default test runs in non-prod
+  if (!IS_PRODUCTION && !authHeader) {
+    const [rows] = await dbPool.query('SELECT * FROM users WHERE id = 1');
+    if (rows.length > 0) {
+      req.user = rows[0];
+      return next();
+    }
+  }
+
+  return res.status(401).json({ success: false, message: 'Authorization required. Bearer token missing.' });
+};
+
+// Token-only middleware for initial sync (before user row exists in DB)
+const authenticateTokenOnly = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ') || !jwtVerifier) {
+    if (!IS_PRODUCTION && req.headers['x-mock-sub']) {
+      req.tokenPayload = {
+        sub: req.headers['x-mock-sub'],
+        email: req.headers['x-mock-email'] || 'test@freshfarm.test'
+      };
+      return next();
+    }
+    return res.status(401).json({ success: false, message: 'Valid Bearer token required for user sync' });
+  }
+
+  const token = authHeader.split(' ')[1];
+  try {
+    const payload = await jwtVerifier.verify(token);
+    req.tokenPayload = payload;
     next();
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    res.status(401).json({ success: false, message: 'Invalid token', error: err.message });
   }
 };
 
@@ -137,43 +196,52 @@ function getImageUrl(s3Key) {
   return `https://${APP_CONFIG.s3_bucket}.s3.${REGION}.amazonaws.com/${s3Key}`;
 }
 
-// ---------------- USER SYNC & PROFILE ENDPOINTS ----------------
+// ---------------- USER SYNC & PROFILE ENDPOINTS (P0: #4, #5) ----------------
 
-app.post('/api/users/sync', async (req, res) => {
-  const { cognito_sub, name, email, phone, role, farm_name, farm_description, farm_location } = req.body;
+app.post('/api/users/sync', authenticateTokenOnly, async (req, res) => {
+  const verifiedSub = req.tokenPayload.sub;
+  const verifiedEmail = req.tokenPayload.email || req.body.email;
+  const { name, phone, apply_as_farmer, farm_name, farm_description, farm_location } = req.body;
 
-  if (!cognito_sub || !name || !email) {
-    return res.status(400).json({ success: false, message: 'cognito_sub, name, and email are required' });
+  if (!name || !verifiedEmail) {
+    return res.status(400).json({ success: false, message: 'name and email are required' });
   }
 
-  const assignedRole = role === 'FARMER' ? 'FARMER' : 'CUSTOMER';
   const conn = await dbPool.getConnection();
-
   try {
     await conn.beginTransaction();
+
+    const assignedRole = apply_as_farmer ? 'FARMER' : 'CUSTOMER';
 
     await conn.execute(`
       INSERT INTO users (cognito_sub, name, email, phone, role)
       VALUES (?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE name = VALUES(name), phone = VALUES(phone)
-    `, [cognito_sub, name, email, phone || null, assignedRole]);
+    `, [verifiedSub, name, verifiedEmail, phone || null, assignedRole]);
 
-    const [userRows] = await conn.query('SELECT id, role FROM users WHERE cognito_sub = ?', [cognito_sub]);
+    const [userRows] = await conn.query('SELECT id, role FROM users WHERE cognito_sub = ?', [verifiedSub]);
     const userId = userRows[0].id;
 
-    if (assignedRole === 'FARMER' && farm_name) {
+    // P0: #5 - Set new farmer profiles to 'PENDING', NEVER automatically 'APPROVED'
+    if (apply_as_farmer && farm_name) {
       await conn.execute(`
         INSERT INTO farmer_profiles (user_id, farm_name, description, location, verification_status)
-        VALUES (?, ?, ?, ?, 'APPROVED')
+        VALUES (?, ?, ?, ?, 'PENDING')
         ON DUPLICATE KEY UPDATE farm_name = VALUES(farm_name), description = VALUES(description), location = VALUES(location)
       `, [userId, farm_name, farm_description || null, farm_location || 'Pending Verification']);
     }
 
     await conn.commit();
-    res.json({ success: true, user_id: userId, role: assignedRole, message: 'User profile synced successfully' });
+    res.json({
+      success: true,
+      user_id: userId,
+      role: assignedRole,
+      verification_status: apply_as_farmer ? 'PENDING' : null,
+      message: 'User profile synced successfully'
+    });
   } catch (err) {
     await conn.rollback();
-    console.error('Error syncing user profile:', err);
+    console.error('Error syncing profile:', err);
     res.status(500).json({ success: false, error: err.message });
   } finally {
     conn.release();
@@ -182,7 +250,7 @@ app.post('/api/users/sync', async (req, res) => {
 
 app.get('/api/users/me', authenticateUser, async (req, res) => {
   try {
-    let profile = { ...req.user };
+    const profile = { ...req.user };
     delete profile.cognito_sub;
 
     if (req.user.role === 'FARMER') {
@@ -246,12 +314,14 @@ app.post('/api/batches', async (req, res) => {
 });
 
 app.post('/api/documents/presigned-url', async (req, res) => {
-  const { fileName, fileType } = req.body;
+  const { fileName, fileType, folder } = req.body;
   if (!fileName || !fileType) {
     return res.status(400).json({ success: false, message: 'File name and type required' });
   }
 
-  const s3Key = `invoices/${Date.now()}-${fileName}`;
+  const prefix = folder === 'products' ? 'products' : 'invoices';
+  const s3Key = `${prefix}/${Date.now()}-${fileName}`;
+
   try {
     const command = new PutObjectCommand({
       Bucket: APP_CONFIG.s3_bucket,
@@ -303,7 +373,7 @@ app.post('/api/batches/:id/document', async (req, res) => {
   }
 });
 
-// ---------------- MARKETPLACE CATALOGUE ENDPOINTS ----------------
+// ---------------- MARKETPLACE CATALOGUE ENDPOINTS (P1: #7) ----------------
 
 app.get('/api/products', async (req, res) => {
   const { category, search } = req.query;
@@ -362,11 +432,11 @@ app.get('/api/products/:id', async (req, res) => {
         fp.id AS farmer_id, fp.farm_name
       FROM products p
       JOIN farmer_profiles fp ON p.farmer_id = fp.id
-      WHERE p.id = ? AND p.is_active = 1
+      WHERE p.id = ? AND p.is_active = 1 AND fp.verification_status = 'APPROVED'
     `, [id]);
 
     if (productRows.length === 0) {
-      return res.status(404).json({ success: false, message: 'Product not found or inactive' });
+      return res.status(404).json({ success: false, message: 'Product not found, inactive, or unapproved' });
     }
 
     const row = productRows[0];
@@ -400,11 +470,13 @@ app.get('/api/products/:id', async (req, res) => {
   }
 });
 
+// ---------------- FARMER PRODUCT MANAGEMENT (P0: #6; P1: #8) ----------------
+
 app.post('/api/farmer/products', authenticateUser, requireRole('FARMER', 'ADMIN'), async (req, res) => {
   const { name, description, category, price_paise, unit, image_s3_key } = req.body;
 
   if (!name || !price_paise || !category) {
-    return res.status(400).json({ success: false, message: 'Product name, price in paise, and category required' });
+    return res.status(400).json({ success: false, message: 'Product name, price_paise, and category are required' });
   }
 
   try {
@@ -414,7 +486,10 @@ app.post('/api/farmer/products', authenticateUser, requireRole('FARMER', 'ADMIN'
     );
 
     if (farmer.length === 0 || farmer[0].verification_status !== 'APPROVED') {
-      return res.status(403).json({ success: false, message: 'Only approved farmers can publish products' });
+      return res.status(403).json({
+        success: false,
+        message: 'Only approved farmers can publish products. Your profile status is PENDING or unverified.'
+      });
     }
 
     const [result] = await dbPool.execute(`
@@ -436,9 +511,10 @@ app.patch('/api/farmer/products/:id', authenticateUser, requireRole('FARMER', 'A
     const [farmer] = await dbPool.query('SELECT id FROM farmer_profiles WHERE user_id = ?', [req.user.id]);
     if (farmer.length === 0) return res.status(403).json({ success: false, message: 'Farmer profile not found' });
 
+    // Strict ownership verification (P0: #6)
     const [product] = await dbPool.query('SELECT id FROM products WHERE id = ? AND farmer_id = ?', [id, farmer[0].id]);
     if (product.length === 0) {
-      return res.status(404).json({ success: false, message: 'Product not found or not owned by you' });
+      return res.status(403).json({ success: false, message: 'Access denied: You do not own this product' });
     }
 
     await dbPool.execute(`
@@ -458,7 +534,7 @@ app.patch('/api/farmer/products/:id', authenticateUser, requireRole('FARMER', 'A
   }
 });
 
-// ---------------- TRANSACTIONAL ORDER PROCESSING ----------------
+// ---------------- TRANSACTIONAL CHECKOUT & ORDERS (P1: #9, #10) ----------------
 
 app.post('/api/orders', authenticateUser, async (req, res) => {
   const { items, delivery_address } = req.body;
@@ -466,7 +542,7 @@ app.post('/api/orders', authenticateUser, async (req, res) => {
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ success: false, message: 'Cart items cannot be empty' });
   }
-  if (!delivery_address || typeof delivery_address !== 'string') {
+  if (!delivery_address || typeof delivery_address !== 'string' || delivery_address.trim().length === 0) {
     return res.status(400).json({ success: false, message: 'Valid delivery address is required' });
   }
 
@@ -499,7 +575,7 @@ app.post('/api/orders', authenticateUser, async (req, res) => {
       const lineTotalPaise = Math.round(unitPricePaise * orderQty);
       grandTotalPaise += lineTotalPaise;
 
-      // Lock batch rows with FOR UPDATE
+      // Atomic row-level locking via FOR UPDATE
       const [batches] = await connection.query(`
         SELECT id, quantity_kg 
         FROM batches 
@@ -543,7 +619,7 @@ app.post('/api/orders', authenticateUser, async (req, res) => {
     const [orderResult] = await connection.execute(`
       INSERT INTO orders (customer_id, total_paise, delivery_address, payment_status, order_status)
       VALUES (?, ?, ?, 'DEMO_PAID', 'PLACED')
-    `, [req.user.id, grandTotalPaise, delivery_address]);
+    `, [req.user.id, grandTotalPaise, delivery_address.trim()]);
 
     const orderId = orderResult.insertId;
 
@@ -556,7 +632,7 @@ app.post('/api/orders', authenticateUser, async (req, res) => {
 
     await connection.execute(`
       INSERT INTO order_status_history (order_id, status, notes)
-      VALUES (?, 'PLACED', 'Order placed with Demo Checkout')
+      VALUES (?, 'PLACED', 'Order placed successfully')
     `, [orderId]);
 
     await connection.commit();
@@ -565,8 +641,8 @@ app.post('/api/orders', authenticateUser, async (req, res) => {
       snsClient.send(new PublishCommand({
         TopicArn: APP_CONFIG.sns_topic_arn,
         Subject: `FreshFarm Order #${orderId} Confirmed`,
-        Message: `New demo order #${orderId} placed for Rs. ${(grandTotalPaise / 100).toFixed(2)}.`
-      })).catch(err => console.error('SNS publish error:', err));
+        Message: `New order #${orderId} confirmed for customer #${req.user.id}. Total: ₹${(grandTotalPaise / 100).toFixed(2)}`
+      })).catch(err => console.error('SNS order publish failed:', err));
     }
 
     res.status(201).json({
@@ -637,6 +713,8 @@ app.get('/api/orders/:id', authenticateUser, async (req, res) => {
   }
 });
 
+// ---------------- FARMER ORDER FULFILLMENT & STATE MACHINE (P0: #6; P1: #11) ----------------
+
 app.get('/api/farmer/orders', authenticateUser, requireRole('FARMER', 'ADMIN'), async (req, res) => {
   try {
     const [farmer] = await dbPool.query('SELECT id FROM farmer_profiles WHERE user_id = ?', [req.user.id]);
@@ -658,32 +736,68 @@ app.get('/api/farmer/orders', authenticateUser, requireRole('FARMER', 'ADMIN'), 
   }
 });
 
+const VALID_TRANSITIONS = {
+  'PLACED': ['CONFIRMED', 'CANCELLED'],
+  'CONFIRMED': ['PACKED', 'CANCELLED'],
+  'PACKED': ['OUT_FOR_DELIVERY'],
+  'OUT_FOR_DELIVERY': ['DELIVERED'],
+  'DELIVERED': [],
+  'CANCELLED': []
+};
+
 app.patch('/api/farmer/orders/:id/status', authenticateUser, requireRole('FARMER', 'ADMIN'), async (req, res) => {
   const { id } = req.params;
   const { status, notes } = req.body;
-  const validStatuses = ['PLACED', 'CONFIRMED', 'PACKED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'];
 
-  if (!validStatuses.includes(status)) {
-    return res.status(400).json({ success: false, message: 'Invalid order status' });
-  }
-
-  const conn = await dbPool.getConnection();
   try {
-    await conn.beginTransaction();
+    const [farmer] = await dbPool.query('SELECT id FROM farmer_profiles WHERE user_id = ?', [req.user.id]);
+    if (farmer.length === 0) return res.status(403).json({ success: false, message: 'Farmer profile not found' });
 
-    await conn.query('UPDATE orders SET order_status = ? WHERE id = ?', [status, id]);
-    await conn.query(`
-      INSERT INTO order_status_history (order_id, status, notes)
-      VALUES (?, ?, ?)
-    `, [id, status, notes || `Status changed to ${status}`]);
+    // Verify order contains products from this farmer (P0: #6)
+    const [ownership] = await dbPool.query(`
+      SELECT oi.id 
+      FROM order_items oi
+      JOIN products p ON oi.product_id = p.id
+      WHERE oi.order_id = ? AND p.farmer_id = ?
+    `, [id, farmer[0].id]);
 
-    await conn.commit();
-    res.json({ success: true, message: `Order status updated to ${status}` });
+    if (ownership.length === 0) {
+      return res.status(403).json({ success: false, message: 'Forbidden: You do not have items in this order' });
+    }
+
+    const [orderRows] = await dbPool.query('SELECT order_status FROM orders WHERE id = ?', [id]);
+    if (orderRows.length === 0) return res.status(404).json({ success: false, message: 'Order not found' });
+
+    const currentStatus = orderRows[0].order_status;
+    const allowedNext = VALID_TRANSITIONS[currentStatus] || [];
+
+    if (!allowedNext.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status transition from ${currentStatus} to ${status}. Allowed next states: ${allowedNext.join(', ') || 'None'}`
+      });
+    }
+
+    const conn = await dbPool.getConnection();
+    try {
+      await conn.beginTransaction();
+
+      await conn.query('UPDATE orders SET order_status = ? WHERE id = ?', [status, id]);
+      await conn.query(`
+        INSERT INTO order_status_history (order_id, status, notes)
+        VALUES (?, ?, ?)
+      `, [id, status, notes || `Status updated from ${currentStatus} to ${status}`]);
+
+      await conn.commit();
+      res.json({ success: true, message: `Order #${id} status updated to ${status}` });
+    } catch (txErr) {
+      await conn.rollback();
+      throw txErr;
+    } finally {
+      conn.release();
+    }
   } catch (err) {
-    await conn.rollback();
     res.status(500).json({ success: false, error: err.message });
-  } finally {
-    conn.release();
   }
 });
 
@@ -698,8 +812,7 @@ cron.schedule('0 6 * * *', async () => {
     `);
 
     if (criticalItems.length > 0) {
-      let body = `WARNING: FreshFarm Cold-Chain Shelf Life Alert\n\n`;
-      body += `Items nearing expiration:\n\n`;
+      let body = `WARNING: FreshFarm Cold-Chain Shelf Life Alert\n\nItems nearing expiration:\n\n`;
       criticalItems.forEach(item => {
         body += `- ${item.item_name} (${item.quantity_kg} kg): ${item.days_left} day(s) remaining\n`;
       });
@@ -715,13 +828,32 @@ cron.schedule('0 6 * * *', async () => {
   }
 });
 
-// Bootstrap server
+// ---------------- BOOTSTRAP & GRACEFUL SHUTDOWN (P2: #20) ----------------
 const PORT = process.env.PORT || 5000;
-loadConfigFromSSM()
-  .then(() => initDatabase())
-  .then(() => {
-    initCognitoVerifier();
-    app.listen(PORT, () => {
-      console.log(`FreshFarm API operating on port ${PORT}`);
-    });
+
+async function startServer() {
+  await loadConfigFromSSM();
+  await initDatabase();
+  initCognitoVerifier();
+
+  const server = app.listen(PORT, () => {
+    console.log(`FreshFarm API operating on port ${PORT}`);
   });
+
+  const shutdown = async (signal) => {
+    console.log(`Received ${signal}. Shutting down gracefully...`);
+    server.close(async () => {
+      console.log('HTTP server closed.');
+      if (dbPool) {
+        await dbPool.end();
+        console.log('Database connections closed.');
+      }
+      process.exit(0);
+    });
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+}
+
+startServer();
