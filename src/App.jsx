@@ -72,9 +72,35 @@ async function loadProducts() {
 }
 
 useEffect(() => {
-  loadProducts();
+  getProducts()
+    .then((data) => {
+      setProducts(
+        data.map((product) => ({
+          id: product.id,
+          name: product.name,
+          category: product.category,
+          price: Number(product.price_paise) / 100,
+          unit: product.unit,
+          stock: Number(product.available_quantity) || 0,
+          farmer: product.farmer?.farm_name || "Local farmer",
+          location: product.farmer?.location || "Location unavailable",
+          image:
+            product.image_url ||
+            "https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=700&q=80",
+          description: product.description || "",
+          tag: "",
+        }))
+      );
+    })
+    .catch((err) => {
+      setProductsError(
+        err.message || "Could not load marketplace products"
+      );
+    })
+    .finally(() => {
+      setProductsLoading(false);
+    });
 }, []);
-
 async function refreshAuth() {
   try {
     const session = await fetchAuthSession();
