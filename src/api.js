@@ -36,8 +36,11 @@ export async function getBatches() {
     })
   );
 
-  return result;
-}
+return Array.isArray(result)
+  ? result
+  : Array.isArray(result.data)
+    ? result.data
+    : [];}
 
 export async function getProducts() {
   const result = await readResponse(
