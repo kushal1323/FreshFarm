@@ -5,133 +5,11 @@ import {
   uploadDocument,
   linkDocumentToBatch,
   getDocumentDownloadUrl,
+  getProducts,
 } from "./api";
 import "./App.css";
 import AuthPanel from "./AuthPanel";
 import { fetchAuthSession, signOut } from "aws-amplify/auth";
-
-const products = [
-  {
-    id: 1,
-    name: "Organic Tomatoes",
-    category: "Vegetables",
-    price: 60,
-    unit: "kg",
-    stock: 50,
-    farmer: "Green Valley Farm",
-    location: "Maharashtra",
-    emoji: "🍅",
-    image:
-      "https://images.unsplash.com/photo-1546094096-0df4bcaaa337?auto=format&fit=crop&w=700&q=80",
-    description: "Fresh, naturally grown tomatoes from local farms.",
-    tag: "Bestseller",
-  },
-  {
-    id: 2,
-    name: "Fresh Spinach",
-    category: "Leafy Greens",
-    price: 35,
-    unit: "bunch",
-    stock: 28,
-    farmer: "Sunrise Organics",
-    location: "Maharashtra",
-    emoji: "🥬",
-    image:
-      "https://images.unsplash.com/photo-1576045057995-568f588f82fb?auto=format&fit=crop&w=700&q=80",
-    description: "Tender, fresh leafy greens harvested with care.",
-    tag: "Fresh today",
-  },
-  {
-    id: 3,
-    name: "Organic Carrots",
-    category: "Vegetables",
-    price: 45,
-    unit: "kg",
-    stock: 40,
-    farmer: "Green Valley Farm",
-    location: "Maharashtra",
-    emoji: "🥕",
-    image:
-      "https://images.unsplash.com/photo-1445282768818-728615cc910a?auto=format&fit=crop&w=700&q=80",
-    description: "Naturally sweet carrots, perfect for everyday cooking.",
-    tag: "",
-  },
-  {
-    id: 4,
-    name: "Farm Fresh Apples",
-    category: "Fruits",
-    price: 140,
-    unit: "kg",
-    stock: 32,
-    farmer: "Hilltop Orchards",
-    location: "Himachal Pradesh",
-    emoji: "🍎",
-    image:
-      "https://images.unsplash.com/photo-1560806887-1e4cd0b6cbd6?auto=format&fit=crop&w=700&q=80",
-    description: "Crisp apples sourced directly from the orchard.",
-    tag: "Popular",
-  },
-  {
-    id: 5,
-    name: "Sweet Strawberries",
-    category: "Fruits",
-    price: 180,
-    unit: "box",
-    stock: 16,
-    farmer: "Berry Patch Farm",
-    location: "Maharashtra",
-    emoji: "🍓",
-    image:
-      "https://images.unsplash.com/photo-1464965911861-746a04b4bca6?auto=format&fit=crop&w=700&q=80",
-    description: "Sweet, bright strawberries for your favourite treats.",
-    tag: "Seasonal",
-  },
-  {
-    id: 6,
-    name: "Fresh Broccoli",
-    category: "Vegetables",
-    price: 75,
-    unit: "piece",
-    stock: 22,
-    farmer: "Sunrise Organics",
-    location: "Maharashtra",
-    emoji: "🥦",
-    image:
-      "https://images.unsplash.com/photo-1459411621453-7b03977f4bfc?auto=format&fit=crop&w=700&q=80",
-    description: "Fresh green broccoli sourced from local growers.",
-    tag: "",
-  },
-  {
-    id: 7,
-    name: "Organic Bananas",
-    category: "Fruits",
-    price: 55,
-    unit: "dozen",
-    stock: 35,
-    farmer: "Green Valley Farm",
-    location: "Maharashtra",
-    emoji: "🍌",
-    image:
-      "https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?auto=format&fit=crop&w=700&q=80",
-    description: "Naturally ripened bananas for a wholesome snack.",
-    tag: "",
-  },
-  {
-    id: 8,
-    name: "Farm Fresh Potatoes",
-    category: "Vegetables",
-    price: 30,
-    unit: "kg",
-    stock: 70,
-    farmer: "Hilltop Orchards",
-    location: "Maharashtra",
-    emoji: "🥔",
-    image:
-      "https://images.unsplash.com/photo-1518977676601-b53f82aba655?auto=format&fit=crop&w=700&q=80",
-    description: "Everyday kitchen essentials sourced from local farms.",
-    tag: "Great value",
-  },
-];
 
 const categories = [
   { name: "All produce", emoji: "🌱" },
@@ -159,6 +37,45 @@ export default function App() {
 
   const [authUser, setAuthUser] = useState(null);
 const [authLoading, setAuthLoading] = useState(true);
+const [products, setProducts] = useState([]);
+const [productsLoading, setProductsLoading] = useState(true);
+const [productsError, setProductsError] = useState("");
+
+async function loadProducts() {
+  try {
+    setProductsLoading(true);
+
+    const data = await getProducts();
+
+    setProducts(
+      data.map((product) => ({
+        id: product.id,
+        name: product.name,
+        category: product.category,
+        price: Number(product.price_paise) / 100,
+        unit: product.unit,
+        stock: Number(product.available_quantity) || 0,
+        farmer: product.farmer?.farm_name || "Local farmer",
+        location: product.farmer?.location || "Location unavailable",
+        image:
+          product.image_url ||
+          "https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=700&q=80",
+        description: product.description || "",
+        tag: "",
+      }))
+    );
+
+    setProductsError("");
+  } catch (err) {
+    setProductsError(err.message || "Could not load marketplace products");
+  } finally {
+    setProductsLoading(false);
+  }
+}
+
+useEffect(() => {
+  loadProducts();
+}, []);
 
 async function refreshAuth() {
   try {
@@ -268,7 +185,7 @@ useEffect(() => {
     }
 
     return result;
-  }, [search, category, sort]);
+}, [products, search, category, sort]);
 
   const cartCount = cart.reduce((total, item) => total + item.quantity, 0);
 

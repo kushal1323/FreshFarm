@@ -36,8 +36,17 @@ export async function getBatches() {
     })
   );
 
-  return Array.isArray(result) ? result : result.data || [];
+  return result;
 }
+
+export async function getProducts() {
+  const result = await readResponse(
+    await fetch(`${API_BASE_URL}/products`)
+  );
+
+  return result.data || [];
+}
+
 
 export async function addBatch(batchData) {
   const result = await readResponse(
