@@ -1,5 +1,7 @@
 
-const API_BASE_URL = "http://13.63.166.10";
+const API_BASE_URL = import.meta.env.DEV
+  ? "http://51.20.74.216"
+  : "";
 
 async function readResponse(response) {
   const result = await response.json();
