@@ -146,15 +146,6 @@ const authenticateUser = async (req, res, next) => {
     }
   }
 
-  // Fallback for default test runs in non-prod
-  if (!IS_PRODUCTION && !authHeader) {
-    const [rows] = await dbPool.query('SELECT * FROM users WHERE id = 1');
-    if (rows.length > 0) {
-      req.user = rows[0];
-      return next();
-    }
-  }
-
   return res.status(401).json({ success: false, message: 'Authorization required. Bearer token missing.' });
 };
 
