@@ -1,4 +1,4 @@
-import { SSMClient, GetParametersCommand } from '@aws-sdk/client-ssm';
+﻿import { SSMClient, GetParametersCommand } from '@aws-sdk/client-ssm';
 import mysql from 'mysql2/promise';
 
 async function seed() {

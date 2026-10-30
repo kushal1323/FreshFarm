@@ -7,6 +7,8 @@ import {
   getDocumentDownloadUrl,
 } from "./api";
 import "./App.css";
+import AuthPanel from "./AuthPanel";
+import { fetchAuthSession, signOut } from "aws-amplify/auth";
 
 const products = [
   {
@@ -154,6 +156,68 @@ const formatPrice = (amount) =>
   }).format(amount);
 
 export default function App() {
+
+  const [authUser, setAuthUser] = useState(null);
+const [authLoading, setAuthLoading] = useState(true);
+
+async function refreshAuth() {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken;
+
+    if (!token) {
+      setAuthUser(null);
+      return;
+    }
+
+    setAuthUser({
+      email: token.payload.email,
+      role: token.payload["custom:role"],
+    });
+  } catch {
+    setAuthUser(null);
+  } finally {
+    setAuthLoading(false);
+  }
+}
+
+async function handleLogout() {
+  await signOut();
+  setAuthUser(null);
+  setPage("shop");
+}
+
+useEffect(() => {
+  let active = true;
+
+  fetchAuthSession()
+    .then((session) => {
+      if (!active) return;
+
+      const token = session.tokens?.idToken;
+
+      setAuthUser(
+        token
+          ? {
+              email: token.payload.email,
+              role: token.payload["custom:role"],
+            }
+          : null
+      );
+    })
+    .catch(() => {
+      if (active) setAuthUser(null);
+    })
+    .finally(() => {
+      if (active) setAuthLoading(false);
+    });
+
+  return () => {
+    active = false;
+  };
+}, []);
+
+
   const [page, setPage] = useState("shop");
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All produce");
@@ -232,7 +296,12 @@ export default function App() {
     }
   }
 
-  useEffect(() => {
+  
+useEffect(() => {
+  if (!authUser || authUser.role !== "farmer") {
+    return;
+  }
+
   let cancelled = false;
 
   async function fetchInventory() {
@@ -263,7 +332,8 @@ export default function App() {
   return () => {
     cancelled = true;
   };
-}, []);
+}, [authUser]);
+
 
   function addToCart(product) {
     setOrderMessage("");
@@ -383,11 +453,22 @@ export default function App() {
   }
 
   const criticalCount = batches.filter(
-    (batch) => batch.dynamic_status === "CRITICAL"
-  ).length;
+  (batch) => batch.dynamic_status === "CRITICAL"
+).length;
 
-  return (
-    <div className="freshfarm-app">
+// Show loading screen while checking Cognito session
+if (authLoading) {
+  return <div className="auth-page">Loading FreshFarm...</div>;
+}
+
+// Show login/register if user is not authenticated
+if (!authUser) {
+  return <AuthPanel onLogin={refreshAuth} />;
+}
+
+// Render the existing FreshFarm application
+return (
+  <div className="freshfarm-app">
       <header className="site-header">
         <button
           className="brand"
@@ -428,21 +509,28 @@ export default function App() {
           >
             Shop
           </button>
-          <button
-            className={`nav-link ${page === "inventory" ? "active" : ""}`}
-            onClick={() => {
-              setPage("inventory");
-              setCartOpen(false);
-            }}
-          >
-            Farmer portal
-          </button>
+          {authUser.role === "farmer" && (
+  <button
+    className={`nav-link ${page === "inventory" ? "active" : ""}`}
+    onClick={() => {
+      setPage("inventory");
+      setCartOpen(false);
+    }}
+  >
+    Farmer portal
+  </button>
+)}
           <button
             className="cart-button"
             onClick={() => setCartOpen((open) => !open)}
           >
             ♧ Cart <span>{cartCount}</span>
           </button>
+          <span className="nav-link">{authUser.email}</span>
+
+<button className="nav-link" onClick={handleLogout}>
+  Sign out
+</button>
         </nav>
       </header>
 

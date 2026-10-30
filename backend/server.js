@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import cors from 'cors';
 import mysql from 'mysql2/promise';
 import cron from 'node-cron';
@@ -143,15 +143,6 @@ const authenticateUser = async (req, res, next) => {
       return next();
     } catch (err) {
       return res.status(500).json({ success: false, error: err.message });
-    }
-  }
-
-  // Fallback for default test runs in non-prod
-  if (!IS_PRODUCTION && !authHeader) {
-    const [rows] = await dbPool.query('SELECT * FROM users WHERE id = 1');
-    if (rows.length > 0) {
-      req.user = rows[0];
-      return next();
     }
   }
 
@@ -368,7 +359,7 @@ app.post('/api/batches/:id/document', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Batch not found' });
     }
     res.json({ success: true, message: 'Document linked to batch' });
-  } catch {
+  } catch{
     res.status(500).json({ success: false, message: 'Failed to link document' });
   }
 });
@@ -641,7 +632,7 @@ app.post('/api/orders', authenticateUser, async (req, res) => {
       snsClient.send(new PublishCommand({
         TopicArn: APP_CONFIG.sns_topic_arn,
         Subject: `FreshFarm Order #${orderId} Confirmed`,
-        Message: `New order #${orderId} confirmed for customer #${req.user.id}. Total: G�${(grandTotalPaise / 100).toFixed(2)}`
+        Message: `New order #${orderId} confirmed for customer #${req.user.id}. Total: Γé╣${(grandTotalPaise / 100).toFixed(2)}`
       })).catch(err => console.error('SNS order publish failed:', err));
     }
 

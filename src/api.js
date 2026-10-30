@@ -1,28 +1,51 @@
 
-const API_BASE_URL = import.meta.env.DEV
-  ? "http://51.20.74.216"
-  : "";
+import { fetchAuthSession } from "aws-amplify/auth";
+
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.DEV ? "http://localhost:5000/api" : "/api");
+
+async function authHeaders(extraHeaders = {}) {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    return {
+      ...extraHeaders,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+  } catch {
+    return extraHeaders;
+  }
+}
 
 async function readResponse(response) {
   const result = await response.json();
+
   if (!response.ok) {
     throw new Error(result.message || result.error || "Request failed");
   }
+
   return result;
 }
 
 export async function getBatches() {
   const result = await readResponse(
-    await fetch(`${API_BASE_URL}/api/batches`)
+    await fetch(`${API_BASE_URL}/batches`, {
+      headers: await authHeaders(),
+    })
   );
+
   return Array.isArray(result) ? result : result.data || [];
 }
 
 export async function addBatch(batchData) {
   const result = await readResponse(
-    await fetch(`${API_BASE_URL}/api/batches`, {
+    await fetch(`${API_BASE_URL}/batches`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await authHeaders({
+        "Content-Type": "application/json",
+      }),
       body: JSON.stringify(batchData),
     })
   );
@@ -36,9 +59,11 @@ export async function addBatch(batchData) {
 
 export async function uploadDocument(file) {
   const result = await readResponse(
-    await fetch(`${API_BASE_URL}/api/documents/presigned-url`, {
+    await fetch(`${API_BASE_URL}/documents/presigned-url`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await authHeaders({
+        "Content-Type": "application/json",
+      }),
       body: JSON.stringify({
         fileName: file.name,
         fileType: file.type || "application/octet-stream",
@@ -63,9 +88,11 @@ export async function uploadDocument(file) {
 
 export async function linkDocumentToBatch(batchId, s3Key) {
   const result = await readResponse(
-    await fetch(`${API_BASE_URL}/api/batches/${batchId}/document`, {
+    await fetch(`${API_BASE_URL}/batches/${batchId}/document`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await authHeaders({
+        "Content-Type": "application/json",
+      }),
       body: JSON.stringify({ s3Key }),
     })
   );
@@ -80,7 +107,10 @@ export async function linkDocumentToBatch(batchId, s3Key) {
 export async function getDocumentDownloadUrl(key) {
   const result = await readResponse(
     await fetch(
-      `${API_BASE_URL}/api/documents/download-url?key=${encodeURIComponent(key)}`
+      `${API_BASE_URL}/documents/download-url?key=${encodeURIComponent(key)}`,
+      {
+        headers: await authHeaders(),
+      }
     )
   );
 

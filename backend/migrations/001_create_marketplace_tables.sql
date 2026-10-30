@@ -1,4 +1,4 @@
--- 1. Users Table
+﻿-- 1. Users Table
 CREATE TABLE IF NOT EXISTS `users` (
   `id` INT NOT NULL AUTO_INCREMENT,
   `cognito_sub` VARCHAR(100) NOT NULL UNIQUE,
