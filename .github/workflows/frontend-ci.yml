@@ -57,12 +57,12 @@ jobs:
 
       - name: Configure SSH
         env:
-          SSH_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          SSH_KEY_B64: ${{ secrets.EC2_SSH_PRIVATE_KEY_B64 }}
           EC2_HOST: ${{ secrets.EC2_HOST }}
         run: |
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/freshfarm_key
+          printf '%s' "$SSH_KEY_B64" | base64 --decode > ~/.ssh/freshfarm_key
           chmod 600 ~/.ssh/freshfarm_key
           ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
 
