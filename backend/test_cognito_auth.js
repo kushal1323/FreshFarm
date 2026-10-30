@@ -1,4 +1,4 @@
-﻿import assert from 'assert';
+import assert from 'assert';
 import { SSMClient, GetParametersCommand } from '@aws-sdk/client-ssm';
 import { 
   CognitoIdentityProviderClient, 
@@ -26,13 +26,13 @@ async function getCognitoConfig() {
 }
 
 async function runAuthTests() {
-  console.log('≡ƒº¬ Starting Cognito JWT Token Verification Test Suite...\n');
+  console.log('🧪 Starting Cognito JWT Token Verification Test Suite...\n');
 
   // Test 1: Reject request when Bearer token is missing
   console.log('Test 1: Reject request when Bearer token is missing');
   const noAuthRes = await fetch(`${BASE_URL}/users/me`);
   assert.strictEqual(noAuthRes.status, 401, 'Should return 401 when token is omitted in strict mode');
-  console.log('Γ£à Correctly rejected unauthenticated request\n');
+  console.log('✅ Correctly rejected unauthenticated request\n');
 
   // Test 2: Reject malformed / forged Bearer token
   console.log('Test 2: Reject malformed / forged Bearer token');
@@ -44,7 +44,7 @@ async function runAuthTests() {
   const fakeTokenBody = await fakeTokenRes.json();
   assert.strictEqual(fakeTokenRes.status, 401);
   assert.strictEqual(fakeTokenBody.success, false);
-  console.log('Γ£à Successfully rejected invalid/forged signature token\n');
+  console.log('✅ Successfully rejected invalid/forged signature token\n');
 
   // Cognito Config Check
   const { cognito_user_pool_id, cognito_client_id } = await getCognitoConfig();
@@ -89,7 +89,7 @@ async function runAuthTests() {
 
     idToken = authRes.AuthenticationResult?.IdToken;
   } catch (err) {
-    console.log(`Γä╣∩╕Å Live user sign-in skipped (${err.message}). Testing auth guards via verified mock payload...`);
+    console.log(`ℹ️ Live user sign-in skipped (${err.message}). Testing auth guards via verified mock payload...`);
   }
 
   // Test 3: User Sync
@@ -111,7 +111,7 @@ async function runAuthTests() {
   const syncData = await syncRes.json();
   assert.strictEqual(syncRes.status, 200);
   assert.strictEqual(syncData.success, true);
-  console.log(`Γ£à User profile synced with ID #${syncData.user_id}\n`);
+  console.log(`✅ User profile synced with ID #${syncData.user_id}\n`);
 
   // Test 4: Profile Retrieval
   console.log('Test 4: GET /api/users/me authenticated profile');
@@ -123,7 +123,7 @@ async function runAuthTests() {
   const meData = await meRes.json();
   assert.strictEqual(meRes.status, 200);
   assert.strictEqual(meData.success, true);
-  console.log('Γ£à Profile retrieved from authenticated session\n');
+  console.log('✅ Profile retrieved from authenticated session\n');
 
   // Test 5: Place Order
   console.log('Test 5: POST /api/orders authenticated transaction');
@@ -143,12 +143,12 @@ async function runAuthTests() {
   const orderData = await orderRes.json();
   assert.strictEqual(orderRes.status, 201);
   assert.strictEqual(orderData.success, true);
-  console.log(`Γ£à Order #${orderData.order_id} placed successfully\n`);
+  console.log(`✅ Order #${orderData.order_id} placed successfully\n`);
 
-  console.log('≡ƒÄë All Cognito JWT token verification tests completed successfully!');
+  console.log('🎉 All Cognito JWT token verification tests completed successfully!');
 }
 
 runAuthTests().catch(err => {
-  console.error('Γ¥î Cognito verification test failed:', err);
+  console.error('❌ Cognito verification test failed:', err);
   process.exit(1);
 });

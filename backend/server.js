@@ -1,4 +1,4 @@
-﻿import express from 'express';
+import express from 'express';
 import cors from 'cors';
 import mysql from 'mysql2/promise';
 import cron from 'node-cron';
@@ -632,7 +632,7 @@ app.post('/api/orders', authenticateUser, async (req, res) => {
       snsClient.send(new PublishCommand({
         TopicArn: APP_CONFIG.sns_topic_arn,
         Subject: `FreshFarm Order #${orderId} Confirmed`,
-        Message: `New order #${orderId} confirmed for customer #${req.user.id}. Total: Γé╣${(grandTotalPaise / 100).toFixed(2)}`
+        Message: `New order #${orderId} confirmed for customer #${req.user.id}. Total: ₹${(grandTotalPaise / 100).toFixed(2)}`
       })).catch(err => console.error('SNS order publish failed:', err));
     }
 
