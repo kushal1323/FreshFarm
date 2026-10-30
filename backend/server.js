@@ -368,7 +368,7 @@ app.post('/api/batches/:id/document', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Batch not found' });
     }
     res.json({ success: true, message: 'Document linked to batch' });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, message: 'Failed to link document' });
   }
 });
@@ -641,7 +641,7 @@ app.post('/api/orders', authenticateUser, async (req, res) => {
       snsClient.send(new PublishCommand({
         TopicArn: APP_CONFIG.sns_topic_arn,
         Subject: `FreshFarm Order #${orderId} Confirmed`,
-        Message: `New order #${orderId} confirmed for customer #${req.user.id}. Total: Gé¦${(grandTotalPaise / 100).toFixed(2)}`
+        Message: `New order #${orderId} confirmed for customer #${req.user.id}. Total: Gï¿½${(grandTotalPaise / 100).toFixed(2)}`
       })).catch(err => console.error('SNS order publish failed:', err));
     }
 
