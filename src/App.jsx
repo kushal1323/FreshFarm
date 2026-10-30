@@ -586,6 +586,17 @@ return (
             </div>
 
             <div className="product-grid">
+              {productsLoading && (
+  <p className="col-span-full text-center py-8">
+    Loading fresh produce...
+  </p>
+)}
+
+{productsError && (
+  <p className="col-span-full text-center py-8 text-red-500">
+    {productsError}
+  </p>
+)}
               {filteredProducts.map((product) => {
                 const cartItem = cart.find((item) => item.id === product.id);
 
