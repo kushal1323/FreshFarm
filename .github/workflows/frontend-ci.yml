@@ -66,11 +66,47 @@ jobs:
           chmod 600 ~/.ssh/freshfarm_key
           ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
 
-      - name: Deploy frontend
+      - name: Backup current website
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
         run: |
-         rsync -rlz --delete --no-perms --no-owner --no-group \
+          ssh -i ~/.ssh/freshfarm_key "$EC2_USER@$EC2_HOST" '
+            set -e
+            BACKUP_DIR=/var/www/freshfarm-deploy/backups
+            mkdir -p "$BACKUP_DIR"
+            chmod 755 "$BACKUP_DIR"
+            BACKUP="$BACKUP_DIR/frontend-$(date +%Y%m%d-%H%M%S).tar.gz"
+            tar -czf "$BACKUP" -C /var/www/html .
+            echo "Backup created: $BACKUP"
+          '
+
+      - name: Deploy and verify with automatic rollback
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+        run: |
+          rsync -rlz --delete --no-perms --no-owner --no-group \
             -e "ssh -i ~/.ssh/freshfarm_key" \
             dist/ "$EC2_USER@$EC2_HOST:/var/www/html/"
+
+          ssh -i ~/.ssh/freshfarm_key "$EC2_USER@$EC2_HOST" '
+            set -e
+            BACKUP_DIR=/var/www/freshfarm-deploy/backups
+            LATEST_BACKUP=$(ls -1t "$BACKUP_DIR"/frontend-*.tar.gz | head -n 1)
+
+            if curl -fsS http://127.0.0.1/ -o /dev/null; then
+              echo "Deployment health check passed."
+              ls -1t "$BACKUP_DIR"/frontend-*.tar.gz | tail -n +6 | xargs -r rm --
+            else
+              echo "Health check failed. Rolling back."
+
+              TEMP_DIR=$(mktemp -d)
+              tar -xzf "$LATEST_BACKUP" -C "$TEMP_DIR"
+              rsync -rl --delete "$TEMP_DIR/" /var/www/html/
+              rm -rf "$TEMP_DIR"
+
+              echo "Previous frontend restored."
+              exit 1
+            fi
+          '
