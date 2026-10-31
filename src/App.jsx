@@ -148,7 +148,7 @@ async function refreshAuth() {
 
     setAuthUser({
       email: token.payload.email,
-      role: token.payload["custom:role"],
+      role: String(token.payload["custom:role"] || "").toLowerCase(),
     });
   } catch {
     setAuthUser(null);
@@ -176,7 +176,7 @@ useEffect(() => {
         token
           ? {
               email: token.payload.email,
-              role: token.payload["custom:role"],
+              role: String(token.payload["custom:role"] || "").toLowerCase(),
             }
           : null
       );
@@ -204,6 +204,7 @@ useEffect(() => {
   const [customerName, setCustomerName] = useState("");
   const [customerAddress, setCustomerAddress] = useState("");
   const [orderMessage, setOrderMessage] = useState("");
+  const [orderSubmitting, setOrderSubmitting] = useState(false);
   const [orders, setOrders] = useState([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [ordersError, setOrdersError] = useState("");
@@ -354,13 +355,14 @@ useEffect(() => {
     setCart((current) => current.filter((item) => item.id !== productId));
   }
 
-    async function handleDemoCheckout(event) {
+  async function handleCheckout(event) {
     event.preventDefault();
 
-    if (!cart.length || !customerName.trim() || !customerAddress.trim()) {
+    if (!cart.length || !customerName.trim() || !customerAddress.trim() || orderSubmitting) {
       return;
     }
 
+    setOrderSubmitting(true);
     setOrderMessage("Placing your order...");
 
     try {
@@ -381,10 +383,13 @@ useEffect(() => {
       setCartOpen(false);
       setCustomerName("");
       setCustomerAddress("");
+      await loadOrders();
       setPage("shop");
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
       setOrderMessage(`Order failed: ${err.message}`);
+    } finally {
+      setOrderSubmitting(false);
     }
   }
 
@@ -814,11 +819,8 @@ return (
 
           {orderMessage && (
             <div className="notice demo-notice">
-              <strong>Demo checkout completed</strong>
+              <strong>Order update</strong>
               <p>{orderMessage}</p>
-              <small>
-                This prototype does not create a real backend order yet.
-              </small>
             </div>
           )}
         </main>
@@ -1268,7 +1270,7 @@ return (
           <section
             className="checkout-modal"
             onClick={(event) => event.stopPropagation()}
-            aria-label="Demo checkout"
+            aria-label="Checkout"
           >
             <div className="drawer-heading">
               <div>
@@ -1285,11 +1287,10 @@ return (
             </div>
 
             <p className="muted">
-              This is a frontend demonstration. It will not take payment or
-              create a real order.
+              Confirm your delivery details to place your order. Payment is not collected in this checkout.
             </p>
 
-            <form className="checkout-form" onSubmit={handleDemoCheckout}>
+            <form className="checkout-form" onSubmit={handleCheckout}>
               <label>
                 Your name
                 <input
@@ -1307,17 +1308,17 @@ return (
                   onChange={(e) => setCustomerAddress(e.target.value)}
                   required
                   rows={3}
-                  placeholder="Enter a demo delivery address"
+                  placeholder="Enter your delivery address"
                 />
               </label>
 
               <div className="checkout-total">
-                <span>Demo order total</span>
+                <span>Order total</span>
                 <strong>{formatPrice(cartTotal)}</strong>
               </div>
 
-              <button className="primary-button checkout-button" type="submit">
-                Place demo order
+              <button className="primary-button checkout-button" type="submit" disabled={orderSubmitting}>
+                {orderSubmitting ? "Placing order..." : "Place order"}
               </button>
             </form>
           </section>
