@@ -183,9 +183,33 @@ const requireRole = (...roles) => {
   };
 };
 
-function getImageUrl(s3Key) {
+async function getProductImageUrl(s3Key) {
   if (!s3Key) return null;
-  return `https://${APP_CONFIG.s3_bucket}.s3.${REGION}.amazonaws.com/${s3Key}`;
+
+  // Product images are stored as object keys, never as public S3 URLs.
+  // Limit signing to the product image prefix to avoid turning this into an
+  // arbitrary object URL signing endpoint.
+  if (
+    typeof s3Key !== 'string' ||
+    !s3Key.startsWith('products/') ||
+    s3Key.split('/').some(segment => !segment || segment === '.' || segment === '..')
+  ) {
+    console.warn('Skipped signing invalid product image S3 key.');
+    return null;
+  }
+
+  try {
+    const command = new GetObjectCommand({
+      Bucket: APP_CONFIG.s3_bucket,
+      Key: s3Key
+    });
+    return await getSignedUrl(s3Client, command, { expiresIn: 300 });
+  } catch (error) {
+    // Keep the catalogue available if an individual image cannot be signed;
+    // the frontend's existing image fallback handles a null image_url.
+    console.error('Failed to sign product image URL:', error);
+    return null;
+  }
 }
 
 // ---------------- USER SYNC & PROFILE ENDPOINTS (P0: #4, #5) ----------------
@@ -429,19 +453,19 @@ app.get('/api/products', async (req, res) => {
 
     const [rows] = await dbPool.query(sql, params);
 
-    const formattedData = rows.map(row => ({
+    const formattedData = await Promise.all(rows.map(async row => ({
       id: row.id,
       name: row.name,
       category: row.category,
       price_paise: row.price_paise,
       unit: row.unit,
       available_quantity: parseFloat(row.available_quantity),
-      image_url: getImageUrl(row.image_s3_key),
+      image_url: await getProductImageUrl(row.image_s3_key),
       farmer: {
         id: row.farmer_id,
         farm_name: row.farm_name
       }
-    }));
+    })));
 
     res.json({ success: true, data: formattedData, message: 'Products retrieved successfully' });
   } catch (err) {
@@ -483,7 +507,7 @@ app.get('/api/products/:id', async (req, res) => {
       price_paise: row.price_paise,
       unit: row.unit,
       available_quantity: totalStock,
-      image_url: getImageUrl(row.image_s3_key),
+      image_url: await getProductImageUrl(row.image_s3_key),
       farmer: {
         id: row.farmer_id,
         farm_name: row.farm_name
