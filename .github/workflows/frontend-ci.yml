@@ -76,12 +76,18 @@ jobs:
             rm -rf "$TEMP" "$NEW"
           }
 
+          if [ ! -d "$WEB" ] || find "$WEB" -type d ! -writable -print -quit | grep -q .; then
+            echo "Deployment user cannot write to all directories under $WEB. Grant it directory ownership, then rerun deployment."
+            cleanup
+            exit 1
+          fi
+
           rollback() {
             local deploy_status=$?
             trap - ERR
             echo "Deployment failed. Restoring previous website."
             if [ -f "$BACKUP" ] && tar -xzf "$BACKUP" -C "$TEMP" &&
-              sudo -n rsync -rl --delete "$TEMP/" "$WEB/"; then
+              rsync -rl --delete "$TEMP/" "$WEB/"; then
               echo "Rollback completed."
             else
               echo "Rollback failed. Check sudo access and the deployment logs."
@@ -95,7 +101,7 @@ jobs:
           mkdir -p "$BACKUPS"
           tar -czf "$BACKUP" -C "$WEB" .
 
-          sudo -n rsync -rl --delete "$NEW/" "$WEB/"
+          rsync -rl --delete "$NEW/" "$WEB/"
 
           curl -fsS http://127.0.0.1/ -o /dev/null
 
