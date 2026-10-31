@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   getBatches,
   addBatch,
@@ -41,20 +41,6 @@ export default function App() {
   const [authUser, setAuthUser] = useState(null);
 const [authLoading, setAuthLoading] = useState(true);
 const [products, setProducts] = useState([]);
-  async function loadOrders() {
-    setOrdersLoading(true);
-    setOrdersError("");
-
-    try {
-      const data = await getOrders();
-      setOrders(data);
-    } catch (err) {
-      setOrdersError(err.message);
-    } finally {
-      setOrdersLoading(false);
-    }
-  }
-
   async function toggleOrderDetails(orderId) {
     if (expandedOrder === orderId) {
       setExpandedOrder(null);
@@ -222,6 +208,20 @@ useEffect(() => {
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState("");
   const [downloadingKey, setDownloadingKey] = useState("");
+
+  const loadOrders = useCallback(async () => {
+    setOrdersLoading(true);
+    setOrdersError("");
+
+    try {
+      const data = await getOrders();
+      setOrders(data);
+    } catch (err) {
+      setOrdersError(err.message);
+    } finally {
+      setOrdersLoading(false);
+    }
+  }, []);
 
   const filteredProducts = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -520,19 +520,6 @@ return (
             Shop
           </button>
 
-{authUser.role === "customer" && (
-  <button
-    className={`nav-link ${page === "orders" ? "active" : ""}`}
-    onClick={() => {
-      setPage("orders");
-      setCartOpen(false);
-      loadOrders();
-    }}
-  >
-    My Orders
-  </button>
-)}
-
           {authUser.role === "farmer" && (
   <button
     className={`nav-link ${page === "inventory" ? "active" : ""}`}
@@ -773,7 +760,7 @@ return (
                       </div>
                       <div className="stock-note">
                         {product.stock} {product.unit === "kg" ? "kg" : "units"}{" "}
-                        available · Demo listing
+                        available
                       </div>
                     </div>
                   </article>
@@ -978,6 +965,11 @@ return (
 
                   <p className="muted">
                     {batch.category || "Uncategorized"}
+                  </p>
+                  <p className={`batch-product-link ${batch.product_id ? "is-linked" : "is-unlinked"}`}>
+                    {batch.product_id
+                      ? `Linked to marketplace product #${batch.product_id}`
+                      : "No marketplace product linked"}
                   </p>
                   <div className="batch-details">
                     <p>

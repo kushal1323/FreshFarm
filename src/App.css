@@ -1210,6 +1210,19 @@ textarea:focus-visible {
   padding-top: 8px;
 }
 
+.batch-product-link {
+  margin: 8px 0 0;
+  font-size: 0.82rem;
+}
+
+.batch-product-link.is-linked {
+  color: #315b3e;
+}
+
+.batch-product-link.is-unlinked {
+  color: #9a5b15;
+}
+
 .batch-details p {
   display: flex;
   justify-content: space-between;
