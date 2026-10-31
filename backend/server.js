@@ -527,7 +527,7 @@ app.patch('/api/farmer/products/:id', authenticateUser, requireRole('FARMER', 'A
 
 // ---------------- TRANSACTIONAL CHECKOUT & ORDERS (P1: #9, #10) ----------------
 
-app.post('/api/orders', authenticateUser, async (req, res) => {
+app.post('/api/orders', authenticateUser, requireRole('CUSTOMER'), async (req, res) => {
   const { items, delivery_address } = req.body;
 
   if (!items || !Array.isArray(items) || items.length === 0) {
@@ -547,14 +547,19 @@ app.post('/api/orders', authenticateUser, async (req, res) => {
 
     for (const item of items) {
       const { product_id, quantity } = item;
-      const orderQty = parseFloat(quantity);
+      const orderQty = Number(quantity);
 
-      if (!product_id || isNaN(orderQty) || orderQty <= 0) {
-        throw new Error(`Invalid item quantity or product ID for item: ${JSON.stringify(item)}`);
+      if (!Number.isSafeInteger(Number(product_id)) || Number(product_id) <= 0 ||
+          !Number.isFinite(orderQty) || orderQty <= 0 || orderQty > 99999999.99 ||
+          Math.round(orderQty * 100) !== orderQty * 100) {
+        throw new Error('Each order item must have a valid product ID and a positive quantity with at most two decimal places');
       }
 
       const [productRows] = await connection.query(
-        'SELECT id, price_paise, is_active FROM products WHERE id = ?',
+        `SELECT p.id, p.price_paise, p.is_active
+         FROM products p
+         JOIN farmer_profiles fp ON fp.id = p.farmer_id
+         WHERE p.id = ? AND fp.verification_status = 'APPROVED'`,
         [product_id]
       );
 
@@ -651,7 +656,7 @@ app.post('/api/orders', authenticateUser, async (req, res) => {
   }
 });
 
-app.get('/api/orders', authenticateUser, async (req, res) => {
+app.get('/api/orders', authenticateUser, requireRole('CUSTOMER'), async (req, res) => {
   try {
     const [orders] = await dbPool.query(`
       SELECT id, total_paise, delivery_address, payment_status, order_status, created_at
@@ -665,8 +670,11 @@ app.get('/api/orders', authenticateUser, async (req, res) => {
   }
 });
 
-app.get('/api/orders/:id', authenticateUser, async (req, res) => {
+app.get('/api/orders/:id', authenticateUser, requireRole('CUSTOMER'), async (req, res) => {
   const { id } = req.params;
+  if (!/^\d+$/.test(id) || !Number.isSafeInteger(Number(id)) || Number(id) <= 0) {
+    return res.status(400).json({ success: false, message: 'A valid order ID is required' });
+  }
   try {
     const [orderRows] = await dbPool.query(
       'SELECT * FROM orders WHERE id = ? AND customer_id = ?',

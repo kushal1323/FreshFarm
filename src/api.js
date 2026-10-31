@@ -149,3 +149,35 @@ export async function createOrder(orderData) {
 
   return result;
 }
+export async function getOrders() {
+  const result = await readResponse(
+    await fetch(`${API_BASE_URL}/orders`, {
+      headers: await authHeaders(),
+    })
+  );
+
+  if (!Array.isArray(result.data)) {
+    throw new Error("The API returned an invalid orders response");
+  }
+
+  return result.data;
+}
+
+export async function getOrderDetails(orderId) {
+  const normalizedOrderId = Number(orderId);
+  if (!Number.isSafeInteger(normalizedOrderId) || normalizedOrderId <= 0) {
+    throw new Error("A valid order ID is required");
+  }
+
+  const result = await readResponse(
+    await fetch(`${API_BASE_URL}/orders/${encodeURIComponent(normalizedOrderId)}`, {
+      headers: await authHeaders(),
+    })
+  );
+
+  if (!result.data || !Array.isArray(result.data.items)) {
+    throw new Error("The API returned invalid order details");
+  }
+
+  return result.data;
+}
