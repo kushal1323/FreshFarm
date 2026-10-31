@@ -72,27 +72,30 @@ jobs:
           BACKUP=$BACKUPS/frontend-$STAMP.tar.gz
           TEMP=$(mktemp -d)
 
-          rollback() {
-            echo "Deployment failed. Restoring previous website."
-            if [ -f "$BACKUP" ]; then
-              tar -xzf "$BACKUP" -C "$TEMP"
-              rsync -rl --delete "$TEMP/" "$WEB/"
-              echo "Rollback completed."
-            else
-              echo "No backup available for rollback."
-            fi
-          }
-
           cleanup() {
             rm -rf "$TEMP" "$NEW"
           }
 
-          trap 'rollback; cleanup' ERR
+          rollback() {
+            local deploy_status=$?
+            trap - ERR
+            echo "Deployment failed. Restoring previous website."
+            if [ -f "$BACKUP" ] && tar -xzf "$BACKUP" -C "$TEMP" &&
+              sudo -n rsync -rl --delete "$TEMP/" "$WEB/"; then
+              echo "Rollback completed."
+            else
+              echo "Rollback failed. Check sudo access and the deployment logs."
+            fi
+            cleanup
+            exit "$deploy_status"
+          }
+
+          trap rollback ERR
 
           mkdir -p "$BACKUPS"
           tar -czf "$BACKUP" -C "$WEB" .
 
-          rsync -rl --delete "$NEW/" "$WEB/"
+          sudo -n rsync -rl --delete "$NEW/" "$WEB/"
 
           curl -fsS http://127.0.0.1/ -o /dev/null
 
