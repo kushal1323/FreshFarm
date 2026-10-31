@@ -181,3 +181,49 @@ export async function getOrderDetails(orderId) {
 
   return result.data;
 }
+
+export async function getFarmerOrders() {
+  const result = await readResponse(
+    await fetch(`${API_BASE_URL}/farmer/orders`, {
+      headers: await authHeaders(),
+    })
+  );
+
+  if (!Array.isArray(result.data)) {
+    throw new Error("The API returned an invalid farmer orders response");
+  }
+
+  return result.data;
+}
+
+export async function updateFarmerOrderStatus(orderId, status, notes = "") {
+  const normalizedOrderId = Number(orderId);
+  const allowedStatuses = [
+    "CONFIRMED",
+    "CANCELLED",
+    "PACKED",
+    "OUT_FOR_DELIVERY",
+    "DELIVERED",
+  ];
+
+  if (!Number.isSafeInteger(normalizedOrderId) || normalizedOrderId <= 0) {
+    throw new Error("A valid order ID is required");
+  }
+  if (!allowedStatuses.includes(status)) {
+    throw new Error("A valid order status is required");
+  }
+
+  const result = await readResponse(
+    await fetch(`${API_BASE_URL}/farmer/orders/${normalizedOrderId}/status`, {
+      method: "PATCH",
+      headers: await authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ status, notes }),
+    })
+  );
+
+  if (!result.success) {
+    throw new Error(result.message || "Could not update order status");
+  }
+
+  return result;
+}

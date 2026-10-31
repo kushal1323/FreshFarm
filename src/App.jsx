@@ -9,6 +9,8 @@ import {
   createOrder,
   getOrders,
   getOrderDetails,
+  getFarmerOrders,
+  updateFarmerOrderStatus,
 } from "./api";
 import "./App.css";
 import AuthPanel from "./AuthPanel";
@@ -39,6 +41,23 @@ const formatPrice = (amount) =>
 const normalizeRole = (role) => {
   const normalizedRole = String(role || "").trim().toLowerCase();
   return normalizedRole === "buyer" ? "customer" : normalizedRole;
+};
+
+const nextOrderStatuses = {
+  PLACED: ["CONFIRMED", "CANCELLED"],
+  CONFIRMED: ["PACKED", "CANCELLED"],
+  PACKED: ["OUT_FOR_DELIVERY"],
+  OUT_FOR_DELIVERY: ["DELIVERED"],
+  DELIVERED: [],
+  CANCELLED: [],
+};
+
+const orderStatusLabels = {
+  CONFIRMED: "Accept order",
+  CANCELLED: "Cancel order",
+  PACKED: "Mark packed",
+  OUT_FOR_DELIVERY: "Send for delivery",
+  DELIVERED: "Mark delivered",
 };
 
 export default function App() {
@@ -210,6 +229,11 @@ useEffect(() => {
   const [ordersError, setOrdersError] = useState("");
   const [expandedOrder, setExpandedOrder] = useState(null);
   const [orderDetails, setOrderDetails] = useState({});
+  const [farmerOrders, setFarmerOrders] = useState([]);
+  const [farmerOrdersLoading, setFarmerOrdersLoading] = useState(true);
+  const [farmerOrdersError, setFarmerOrdersError] = useState("");
+  const [farmerOrdersMessage, setFarmerOrdersMessage] = useState("");
+  const [updatingFarmerOrderId, setUpdatingFarmerOrderId] = useState(null);
   // Existing inventory state
   const [batches, setBatches] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -236,6 +260,98 @@ useEffect(() => {
       setOrdersLoading(false);
     }
   }, []);
+
+  const loadFarmerOrders = useCallback(async (showLoading = true) => {
+    if (showLoading) setFarmerOrdersLoading(true);
+    setFarmerOrdersError("");
+
+    try {
+      const data = await getFarmerOrders();
+      setFarmerOrders(data);
+    } catch (err) {
+      setFarmerOrdersError(err.message || "Unable to load incoming orders");
+    } finally {
+      if (showLoading) setFarmerOrdersLoading(false);
+    }
+  }, []);
+
+  async function handleFarmerOrderStatus(orderId, status) {
+    setUpdatingFarmerOrderId(String(orderId));
+    setFarmerOrdersMessage("");
+    setFarmerOrdersError("");
+
+    try {
+      await updateFarmerOrderStatus(
+        orderId,
+        status,
+        status === "CANCELLED" ? "Cancelled by farmer" : "Updated by farmer"
+      );
+      setFarmerOrdersMessage(`Order #${orderId} updated to ${status}.`);
+      await loadFarmerOrders(false);
+    } catch (err) {
+      setFarmerOrdersError(err.message || "Unable to update order status");
+    } finally {
+      setUpdatingFarmerOrderId(null);
+    }
+  }
+
+  const groupedFarmerOrders = useMemo(() => {
+    const groups = new Map();
+
+    for (const row of farmerOrders) {
+      const key = String(row.order_id);
+      if (!groups.has(key)) {
+        groups.set(key, {
+          id: row.order_id,
+          status: row.order_status,
+          created_at: row.created_at,
+          delivery_address: row.delivery_address,
+          items: [],
+        });
+      }
+      groups.get(key).items.push(row);
+    }
+
+    return [...groups.values()];
+  }, [farmerOrders]);
+
+  const pendingFarmerOrderCount = useMemo(
+    () =>
+      new Set(
+        farmerOrders
+          .filter((order) => order.order_status === "PLACED")
+          .map((order) => String(order.order_id))
+      ).size,
+    [farmerOrders]
+  );
+
+  useEffect(() => {
+    if (authUser?.role !== "farmer") return undefined;
+
+    let active = true;
+    async function refreshIncomingOrders() {
+      try {
+        const data = await getFarmerOrders();
+        if (active) {
+          setFarmerOrders(data);
+          setFarmerOrdersError("");
+          setFarmerOrdersLoading(false);
+        }
+      } catch (err) {
+        if (active) {
+          setFarmerOrdersError(err.message || "Unable to load incoming orders");
+          setFarmerOrdersLoading(false);
+        }
+      }
+    }
+
+    refreshIncomingOrders();
+    const intervalId = window.setInterval(refreshIncomingOrders, 30000);
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, [authUser?.role]);
 
   const filteredProducts = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -545,6 +661,23 @@ return (
     Inventory dashboard
   </button>
 )}
+          {authUser.role === "farmer" && (
+            <button
+              className={`nav-link ${page === "farmer-orders" ? "active" : ""}`}
+              onClick={() => {
+                setPage("farmer-orders");
+                setCartOpen(false);
+                loadFarmerOrders();
+              }}
+            >
+              Orders
+              {pendingFarmerOrderCount > 0 && (
+                <span className="order-notification-badge" aria-label={`${pendingFarmerOrderCount} new orders`}>
+                  {pendingFarmerOrderCount}
+                </span>
+              )}
+            </button>
+          )}
           {authUser.role !== "farmer" && <button
             className="cart-button"
             onClick={() => setCartOpen((open) => !open)}
@@ -864,6 +997,18 @@ return (
                 {batches.filter((batch) => batch.s3_document_key).length}
               </strong>
             </article>
+            <button
+              className="stat-card stat-card-button"
+              type="button"
+              onClick={() => {
+                setPage("farmer-orders");
+                loadFarmerOrders();
+              }}
+            >
+              <span>Orders to review</span>
+              <strong>{pendingFarmerOrderCount}</strong>
+              <small>View incoming orders</small>
+            </button>
           </section>
 
           <section className="panel">
@@ -1072,6 +1217,106 @@ return (
           </section>
         </main>
       )}
+        {page === "farmer-orders" && authUser.role === "farmer" && (
+          <main className="inventory-page farmer-orders-page">
+            <section className="section-title-row farmer-orders-heading">
+              <div>
+                <span className="section-eyebrow">FARMER WORKSPACE</span>
+                <h1>Incoming orders</h1>
+                <p className="muted">
+                  Orders for your products. New orders refresh automatically.
+                </p>
+              </div>
+              <button
+                className="primary-button"
+                onClick={() => loadFarmerOrders()}
+                disabled={farmerOrdersLoading}
+              >
+                {farmerOrdersLoading ? "Refreshing..." : "Refresh orders"}
+              </button>
+            </section>
+
+            {pendingFarmerOrderCount > 0 && (
+              <div className="farmer-order-alert" role="status">
+                {pendingFarmerOrderCount} new order{pendingFarmerOrderCount === 1 ? "" : "s"} need review.
+              </div>
+            )}
+            {farmerOrdersMessage && <p className="notice">{farmerOrdersMessage}</p>}
+            {farmerOrdersError && <p className="notice error">{farmerOrdersError}</p>}
+            {farmerOrdersLoading && <p>Loading orders for your products...</p>}
+            {!farmerOrdersLoading && !farmerOrdersError && groupedFarmerOrders.length === 0 && (
+              <div className="empty-state farmer-orders-empty">
+                <span>ðŸ“¦</span>
+                <h3>No incoming orders yet</h3>
+                <p>Orders for your listed products will appear here.</p>
+              </div>
+            )}
+
+            <div className="farmer-order-list">
+              {groupedFarmerOrders.map((order) => {
+                const allowedNextStatuses = nextOrderStatuses[order.status] || [];
+                const farmSubtotal = order.items.reduce(
+                  (total, item) => total + Number(item.line_total_paise || 0),
+                  0
+                );
+                const isUpdating = updatingFarmerOrderId === String(order.id);
+
+                return (
+                  <article className="farmer-order-card" key={order.id}>
+                    <div className="farmer-order-card-header">
+                      <div>
+                        <span className="section-eyebrow">ORDER #{order.id}</span>
+                        <p>{new Date(order.created_at).toLocaleString("en-IN")}</p>
+                      </div>
+                      <span className={`farmer-order-status status-${order.status.toLowerCase()}`}>
+                        {order.status.replaceAll("_", " ")}
+                      </span>
+                    </div>
+
+                    <div className="farmer-order-items">
+                      {order.items.map((item, index) => (
+                        <div className="farmer-order-item" key={`${item.product_id}-${index}`}>
+                          <div>
+                            <strong>{item.product_name}</strong>
+                            <span>{item.quantity} units</span>
+                          </div>
+                          <strong>{formatPrice(Number(item.line_total_paise) / 100)}</strong>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="farmer-order-footer">
+                      <div>
+                        <span className="muted">Delivery address</span>
+                        <p>{order.delivery_address}</p>
+                      </div>
+                      <strong className="farmer-order-total">
+                        Your items: {formatPrice(farmSubtotal / 100)}
+                      </strong>
+                    </div>
+
+                    {allowedNextStatuses.length > 0 && (
+                      <div className="farmer-order-actions">
+                        {allowedNextStatuses.map((status) => (
+                          <button
+                            className={status === "CANCELLED" ? "secondary-button danger-button" : "primary-button"}
+                            key={status}
+                            type="button"
+                            disabled={isUpdating}
+                            onClick={() => handleFarmerOrderStatus(order.id, status)}
+                          >
+                            {isUpdating ? "Updating..." : orderStatusLabels[status]}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          </main>
+        )}
+
         {page === "orders" && (
         <main className="inventory-page">
           <section>
