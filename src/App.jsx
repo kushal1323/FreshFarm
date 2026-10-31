@@ -46,6 +46,7 @@ export default function App() {
   const [authUser, setAuthUser] = useState(null);
 const [authLoading, setAuthLoading] = useState(true);
 const [products, setProducts] = useState([]);
+  const [page, setPage] = useState("shop");
   async function toggleOrderDetails(orderId) {
     if (expandedOrder === orderId) {
       setExpandedOrder(null);
@@ -134,15 +135,19 @@ async function refreshAuth() {
 
     if (!token) {
       setAuthUser(null);
+      setPage("shop");
       return;
     }
 
+    const role = normalizeRole(token.payload["custom:role"]);
     setAuthUser({
       email: token.payload.email,
-      role: normalizeRole(token.payload["custom:role"]),
+      role,
     });
+    setPage(role === "farmer" ? "inventory" : "shop");
   } catch {
     setAuthUser(null);
+    setPage("shop");
   } finally {
     setAuthLoading(false);
   }
@@ -162,18 +167,23 @@ useEffect(() => {
       if (!active) return;
 
       const token = session.tokens?.idToken;
+      const role = normalizeRole(token?.payload["custom:role"]);
 
       setAuthUser(
         token
           ? {
               email: token.payload.email,
-              role: normalizeRole(token.payload["custom:role"]),
+              role,
             }
           : null
       );
+      setPage(role === "farmer" ? "inventory" : "shop");
     })
     .catch(() => {
-      if (active) setAuthUser(null);
+      if (active) {
+        setAuthUser(null);
+        setPage("shop");
+      }
     })
     .finally(() => {
       if (active) setAuthLoading(false);
@@ -185,7 +195,6 @@ useEffect(() => {
 }, []);
 
 
-  const [page, setPage] = useState("shop");
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All produce");
   const [sort, setSort] = useState("featured");
@@ -471,12 +480,12 @@ if (!authUser) {
 
 // Render the existing FreshFarm application
 return (
-  <div className="freshfarm-app">
+  <div className={`freshfarm-app ${authUser.role === "farmer" ? "farmer-app" : ""}`}>
       <header className="site-header">
         <button
           className="brand"
           onClick={() => {
-            setPage("shop");
+            setPage(authUser.role === "farmer" ? "inventory" : "shop");
             setCartOpen(false);
           }}
           aria-label="FreshFarm home"
@@ -488,7 +497,7 @@ return (
           </span>
         </button>
 
-        <div className="header-search">
+        {authUser.role !== "farmer" && <div className="header-search">
           <span>⌕</span>
           <input
             value={search}
@@ -500,7 +509,7 @@ return (
             aria-label="Search produce"
           />
           <button onClick={() => setPage("shop")}>Search</button>
-        </div>
+        </div>}
 
         <nav className="header-actions">
         {authUser.role === "customer" && (
@@ -515,7 +524,7 @@ return (
     My Orders
   </button>
 )}
-          <button
+          {authUser.role !== "farmer" && <button
             className={`nav-link ${page === "shop" ? "active" : ""}`}
             onClick={() => {
               setPage("shop");
@@ -523,7 +532,7 @@ return (
             }}
           >
             Shop
-          </button>
+          </button>}
 
           {authUser.role === "farmer" && (
   <button
@@ -533,15 +542,15 @@ return (
       setCartOpen(false);
     }}
   >
-    Farmer portal
+    Inventory dashboard
   </button>
 )}
-          <button
+          {authUser.role !== "farmer" && <button
             className="cart-button"
             onClick={() => setCartOpen((open) => !open)}
           >
             ♧ Cart <span>{cartCount}</span>
-          </button>
+          </button>}
           <span className="nav-link">{authUser.email}</span>
 
 <button className="nav-link" onClick={handleLogout}>
@@ -822,11 +831,11 @@ return (
         <main className="inventory-page">
           <section className="inventory-hero">
             <div>
-              <span className="section-eyebrow">FARMER WORKSPACE</span>
-              <h1>Your farm, in good hands.</h1>
+              <span className="section-eyebrow">FARM OPERATIONS</span>
+              <h1>Your inventory dashboard</h1>
               <p>
-                Manage harvest batches, monitor expiry and store your
-                documents.
+                Track every harvest, watch expiry dates and keep your farm
+                documents close at hand.
               </p>
             </div>
             <button

@@ -1248,6 +1248,162 @@ textarea:focus-visible {
   margin-bottom: 0;
 }
 
+/* Refined farmer workspace and shared surface styling */
+.freshfarm-app {
+  background: #f6f8f4;
+}
+
+.site-header {
+  box-shadow: 0 8px 24px #1b39210a;
+}
+
+.nav-link,
+.primary-button,
+.secondary-button,
+.cart-button,
+.form-action button,
+.upload-form > button {
+  transition:
+    color 160ms ease,
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.nav-link:hover {
+  color: #285c3d;
+}
+
+.stat-card,
+.panel,
+.batch-card,
+.order-card {
+  border-radius: 18px;
+  box-shadow: 0 8px 24px #263b2d08;
+}
+
+.panel {
+  border-color: #e5ebe4;
+}
+
+.farmer-app .announcement {
+  display: none;
+}
+
+.farmer-app .inventory-page {
+  width: min(1240px, 100%);
+  padding: 42px 28px 56px;
+}
+
+.farmer-app .inventory-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  padding: 38px clamp(26px, 4vw, 52px);
+  border: 1px solid #52705a;
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 88% 10%, #8fae6c55 0, transparent 31%),
+    linear-gradient(120deg, #193d2b, #2e6242 68%, #416f48);
+  box-shadow: 0 20px 42px #1f48251f;
+}
+
+.farmer-app .inventory-hero::after {
+  position: absolute;
+  z-index: -1;
+  right: -64px;
+  bottom: -160px;
+  width: 310px;
+  height: 310px;
+  border: 1px solid #ffffff1c;
+  border-radius: 50%;
+  box-shadow: 0 0 0 30px #ffffff0a, 0 0 0 62px #ffffff08;
+  content: "";
+}
+
+.farmer-app .inventory-hero h1 {
+  max-width: 680px;
+  font-size: clamp(2.15rem, 4vw, 3.35rem);
+  letter-spacing: -1.5px;
+}
+
+.farmer-app .inventory-hero p {
+  max-width: 540px;
+  margin-bottom: 0;
+  font-size: 0.98rem;
+}
+
+.farmer-app .inventory-hero .secondary-button {
+  color: #20452f;
+  background: #f3f7ee;
+  border-color: #f3f7ee;
+  box-shadow: 0 8px 18px #10291926;
+}
+
+.farmer-app .inventory-hero .secondary-button:hover:not(:disabled) {
+  background: white;
+  transform: translateY(-1px);
+}
+
+.farmer-app .stats {
+  gap: 18px;
+  margin: 24px 0 28px;
+}
+
+.farmer-app .stat-card {
+  padding: 23px 25px;
+  border-color: #e4ebe2;
+  box-shadow: 0 10px 25px #263b2d0a;
+}
+
+.farmer-app .stat-card span {
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.farmer-app .stat-card strong {
+  color: #244b32;
+  font-family: "Manrope", sans-serif;
+  font-size: 2rem;
+}
+
+.farmer-app .panel {
+  padding: clamp(20px, 3vw, 30px);
+  border-color: #e4ebe2;
+  box-shadow: 0 12px 30px #263b2d09;
+}
+
+.farmer-app .panel h2 {
+  font-size: 1.4rem;
+}
+
+.farmer-app .batch-card {
+  border-color: #e5ebe4;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.farmer-app .batch-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 28px #263b2d12;
+}
+
+@media (max-width: 800px) {
+  .farmer-app .inventory-page {
+    padding: 28px 18px 42px;
+  }
+}
+
+@media (max-width: 520px) {
+  .farmer-app .inventory-page {
+    padding: 20px 12px 36px;
+  }
+
+  .farmer-app .inventory-hero {
+    border-radius: 18px;
+  }
+}
+
 .upload-form {
   display: grid;
   gap: 18px;
