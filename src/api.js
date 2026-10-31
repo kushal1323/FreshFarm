@@ -83,6 +83,20 @@ export async function getProducts() {
   return result.data || [];
 }
 
+export async function getFarmerProducts() {
+  const result = await readResponse(
+    await fetch(`${API_BASE_URL}/farmer/products`, {
+      headers: await authHeaders(),
+    })
+  );
+
+  if (!Array.isArray(result.data)) {
+    throw new Error("The API returned an invalid farmer products response");
+  }
+
+  return result.data;
+}
+
 
 export async function addBatch(batchData) {
   const result = await readResponse(

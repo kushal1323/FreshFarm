@@ -7,6 +7,7 @@ import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
+import { normalizeOptionalProductId } from './batch_product_link.js';
 import {
   buildFarmerProfileDefaults,
   farmerProfileVerificationStatus,
@@ -340,16 +341,17 @@ app.get('/api/batches', async (req, res) => {
   try {
     const query = `
       SELECT
-        id, item_name, category, quantity_kg, harvest_date, expiry_date,
-        s3_document_key, product_id,
-        DATEDIFF(expiry_date, CURDATE()) AS days_remaining,
+        b.id, b.item_name, b.category, b.quantity_kg, b.harvest_date, b.expiry_date,
+        b.s3_document_key, b.product_id, p.name AS product_name,
+        DATEDIFF(b.expiry_date, CURDATE()) AS days_remaining,
         CASE
-          WHEN DATEDIFF(expiry_date, CURDATE()) < 0 THEN 'EXPIRED'
-          WHEN DATEDIFF(expiry_date, CURDATE()) <= 2 THEN 'CRITICAL'
+          WHEN DATEDIFF(b.expiry_date, CURDATE()) < 0 THEN 'EXPIRED'
+          WHEN DATEDIFF(b.expiry_date, CURDATE()) <= 2 THEN 'CRITICAL'
           ELSE 'FRESH'
         END AS dynamic_status
-      FROM batches
-      ORDER BY expiry_date ASC
+      FROM batches b
+      LEFT JOIN products p ON p.id = b.product_id
+      ORDER BY b.expiry_date ASC
     `;
     const [rows] = await dbPool.query(query);
     res.json({ success: true, data: rows });
@@ -358,19 +360,44 @@ app.get('/api/batches', async (req, res) => {
   }
 });
 
-app.post('/api/batches', async (req, res) => {
+app.post('/api/batches', authenticateUser, requireRole('FARMER'), async (req, res) => {
   const { item_name, category, quantity_kg, harvest_date, expiry_date, s3_document_key, product_id } = req.body;
   if (!item_name || !quantity_kg || !harvest_date || !expiry_date) {
     return res.status(400).json({ success: false, message: 'Missing mandatory fields' });
   }
 
+  let normalizedProductId;
   try {
+    normalizedProductId = normalizeOptionalProductId(product_id);
+  } catch (error) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+
+  try {
+    const [farmerRows] = await dbPool.query(
+      'SELECT id FROM farmer_profiles WHERE user_id = ?',
+      [req.user.id]
+    );
+    if (farmerRows.length === 0) {
+      return res.status(403).json({ success: false, message: 'Farmer profile not found' });
+    }
+
+    if (normalizedProductId !== null) {
+      const [ownedProducts] = await dbPool.query(
+        'SELECT id FROM products WHERE id = ? AND farmer_id = ?',
+        [normalizedProductId, farmerRows[0].id]
+      );
+      if (ownedProducts.length === 0) {
+        return res.status(403).json({ success: false, message: 'Selected marketplace product does not belong to your farm' });
+      }
+    }
+
     const query = `
       INSERT INTO batches (item_name, category, quantity_kg, harvest_date, expiry_date, s3_document_key, product_id)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `;
     const [result] = await dbPool.execute(query, [
-      item_name, category, quantity_kg, harvest_date, expiry_date, s3_document_key || null, product_id || null
+      item_name, category, quantity_kg, harvest_date, expiry_date, s3_document_key || null, normalizedProductId
     ]);
     res.status(201).json({ success: true, batch_id: result.insertId });
   } catch (error) {
@@ -536,6 +563,29 @@ app.get('/api/products/:id', async (req, res) => {
 });
 
 // ---------------- FARMER PRODUCT MANAGEMENT (P0: #6; P1: #8) ----------------
+
+app.get('/api/farmer/products', authenticateUser, requireRole('FARMER'), async (req, res) => {
+  try {
+    const [farmerRows] = await dbPool.query(
+      'SELECT id FROM farmer_profiles WHERE user_id = ?',
+      [req.user.id]
+    );
+    if (farmerRows.length === 0) {
+      return res.status(403).json({ success: false, message: 'Farmer profile not found' });
+    }
+
+    const [products] = await dbPool.query(`
+      SELECT id, name, category, is_active
+      FROM products
+      WHERE farmer_id = ?
+      ORDER BY name ASC, id ASC
+    `, [farmerRows[0].id]);
+
+    res.json({ success: true, data: products });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 app.post('/api/farmer/products', authenticateUser, requireRole('FARMER', 'ADMIN'), async (req, res) => {
   const { name, description, category, price_paise, unit, image_s3_key } = req.body;

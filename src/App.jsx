@@ -6,6 +6,7 @@ import {
   linkDocumentToBatch,
   getDocumentDownloadUrl,
   getProducts,
+  getFarmerProducts,
   createOrder,
   getOrders,
   getOrderDetails,
@@ -27,6 +28,7 @@ const categories = [
 
 const emptyForm = {
   item_name: "",
+  product_id: "",
   category: "",
   quantity_kg: "",
   harvest_date: "",
@@ -290,6 +292,9 @@ useEffect(() => {
   const [updatingFarmerOrderId, setUpdatingFarmerOrderId] = useState(null);
   // Existing inventory state
   const [batches, setBatches] = useState([]);
+  const [farmerProducts, setFarmerProducts] = useState([]);
+  const [farmerProductsLoading, setFarmerProductsLoading] = useState(false);
+  const [farmerProductsError, setFarmerProductsError] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [form, setForm] = useState(emptyForm);
@@ -435,6 +440,12 @@ useEffect(() => {
     return result;
 }, [products, search, category, sort]);
 
+  const suggestedFarmerProduct = farmerProducts.find(
+    (product) =>
+      form.item_name.trim() &&
+      product.name.trim().toLocaleLowerCase() === form.item_name.trim().toLocaleLowerCase()
+  );
+
   const cartCount = cart.reduce((total, item) => total + item.quantity, 0);
 
   const cartTotal = cart.reduce(
@@ -442,9 +453,11 @@ useEffect(() => {
     0
   );
 
-  async function loadInventory() {
+  const loadInventory = useCallback(async () => {
     setLoading(true);
     setError("");
+    setFarmerProductsLoading(true);
+    setFarmerProductsError("");
 
     try {
       const data = await getBatches();
@@ -459,45 +472,30 @@ useEffect(() => {
     } finally {
       setLoading(false);
     }
-  }
+    try {
+      setFarmerProducts(await getFarmerProducts());
+    } catch (err) {
+      setFarmerProductsError(err.message || "Unable to load your marketplace products");
+    } finally {
+      setFarmerProductsLoading(false);
+    }
+  }, []);
 
-  
 useEffect(() => {
   if (!authUser || authUser.role !== "farmer") {
     return;
   }
 
   let cancelled = false;
-
-  async function fetchInventory() {
-    try {
-      const data = await getBatches();
-
-      if (cancelled) return;
-
-      setBatches(data);
-      setSelectedBatchId((current) =>
-        data.some((batch) => String(batch.id) === String(current))
-          ? current
-          : ""
-      );
-    } catch (err) {
-      if (!cancelled) {
-        setError(err.message || "Unable to load inventory");
-      }
-    } finally {
-      if (!cancelled) {
-        setLoading(false);
-      }
-    }
-  }
-
-  fetchInventory();
+  const timerId = window.setTimeout(() => {
+    if (!cancelled) loadInventory();
+  }, 0);
 
   return () => {
     cancelled = true;
+    window.clearTimeout(timerId);
   };
-}, [authUser]);
+}, [authUser, loadInventory]);
 
 
   function addToCart(product) {
@@ -583,15 +581,26 @@ useEffect(() => {
     setMessage("");
 
     try {
+      const selectedProduct = farmerProducts.find(
+        (product) => String(product.id) === String(form.product_id)
+      );
       const result = await addBatch({
         ...form,
+        product_id: form.product_id ? Number(form.product_id) : null,
         quantity_kg: Number(form.quantity_kg),
         category: form.category || null,
       });
 
-      setMessage(`Inventory added successfully. Batch ID: ${result.batch_id}`);
+      setMessage(
+        `Inventory added successfully. Batch ID: ${result.batch_id}.${
+          selectedProduct
+            ? ` Linked to marketplace product: ${selectedProduct.name}.`
+            : " No marketplace product linked."
+        }`
+      );
       setForm(emptyForm);
-await loadProducts();
+      await loadProducts();
+      await loadInventory();
     } catch (err) {
       setMessage(`Failed to add inventory: ${err.message}`);
     } finally {
@@ -1089,6 +1098,42 @@ return (
               </label>
 
               <label>
+                Link marketplace product (optional)
+                <select
+                  value={form.product_id}
+                  onChange={(event) =>
+                    setForm({ ...form, product_id: event.target.value })
+                  }
+                >
+                  <option value="">Inventory only — no marketplace link</option>
+                  {farmerProducts.map((product) => (
+                    <option key={product.id} value={product.id}>
+                      {product.name}{product.is_active ? "" : " (inactive listing)"}
+                    </option>
+                  ))}
+                </select>
+                <span className="muted">
+                  Only your marketplace listings are shown. Linking keeps this batch and listing as separate records.
+                </span>
+              </label>
+
+              {farmerProductsLoading && <p className="muted">Loading your marketplace products...</p>}
+              {farmerProductsError && <p className="notice error">{farmerProductsError}</p>}
+              {suggestedFarmerProduct && String(suggestedFarmerProduct.id) !== String(form.product_id) && (
+                <div className="form-action">
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() =>
+                      setForm({ ...form, product_id: String(suggestedFarmerProduct.id) })
+                    }
+                  >
+                    Link matching listing: {suggestedFarmerProduct.name}
+                  </button>
+                </div>
+              )}
+
+              <label>
                 Category
                 <input
                   value={form.category}
@@ -1187,7 +1232,7 @@ return (
                   </p>
                   <p className={`batch-product-link ${batch.product_id ? "is-linked" : "is-unlinked"}`}>
                     {batch.product_id
-                      ? `Linked to marketplace product #${batch.product_id}`
+                      ? `Linked to ${batch.product_name || `marketplace product #${batch.product_id}`}`
                       : "No marketplace product linked"}
                   </p>
                   <div className="batch-details">
