@@ -36,6 +36,11 @@ const formatPrice = (amount) =>
     maximumFractionDigits: 2,
   }).format(amount);
 
+const normalizeRole = (role) => {
+  const normalizedRole = String(role || "").trim().toLowerCase();
+  return normalizedRole === "buyer" ? "customer" : normalizedRole;
+};
+
 export default function App() {
 
   const [authUser, setAuthUser] = useState(null);
@@ -134,7 +139,7 @@ async function refreshAuth() {
 
     setAuthUser({
       email: token.payload.email,
-      role: String(token.payload["custom:role"] || "").toLowerCase(),
+      role: normalizeRole(token.payload["custom:role"]),
     });
   } catch {
     setAuthUser(null);
@@ -162,7 +167,7 @@ useEffect(() => {
         token
           ? {
               email: token.payload.email,
-              role: String(token.payload["custom:role"] || "").toLowerCase(),
+              role: normalizeRole(token.payload["custom:role"]),
             }
           : null
       );
