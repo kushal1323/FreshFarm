@@ -29,6 +29,25 @@ async function readResponse(response) {
   return result;
 }
 
+export async function syncUserProfile(profile = {}) {
+  const result = await readResponse(
+    await fetch(`${API_BASE_URL}/users/sync`, {
+      method: "POST",
+      headers: await authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(profile),
+    })
+  );
+
+  if (!result.success || !result.role) {
+    throw new Error(result.message || "Could not sync your FreshFarm profile");
+  }
+  if (String(result.role).toUpperCase() === "FARMER" && !result.farmer_profile?.id) {
+    throw new Error("Your farmer profile could not be created or loaded");
+  }
+
+  return result;
+}
+
 export async function getBatches() {
   const result = await readResponse(
     await fetch(`${API_BASE_URL}/batches`, {

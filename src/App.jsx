@@ -11,6 +11,7 @@ import {
   getOrderDetails,
   getFarmerOrders,
   updateFarmerOrderStatus,
+  syncUserProfile,
 } from "./api";
 import "./App.css";
 import AuthPanel from "./AuthPanel";
@@ -43,6 +44,19 @@ const normalizeRole = (role) => {
   return normalizedRole === "buyer" ? "customer" : normalizedRole;
 };
 
+const profileSyncPayload = (token) => {
+  const claims = token.payload;
+  const email = claims.email || "";
+
+  return {
+    name: claims.name || email.split("@")[0],
+    phone: claims.phone_number || null,
+    farm_name: claims["custom:farm_name"],
+    farm_location: claims["custom:farm_location"],
+    farm_description: claims["custom:farm_description"],
+  };
+};
+
 const nextOrderStatuses = {
   PLACED: ["CONFIRMED", "CANCELLED"],
   CONFIRMED: ["PACKED", "CANCELLED"],
@@ -66,6 +80,7 @@ export default function App() {
 const [authLoading, setAuthLoading] = useState(true);
 const [products, setProducts] = useState([]);
   const [page, setPage] = useState("shop");
+  const [profileSyncError, setProfileSyncError] = useState("");
   async function toggleOrderDetails(orderId) {
     if (expandedOrder === orderId) {
       setExpandedOrder(null);
@@ -158,7 +173,14 @@ async function refreshAuth() {
       return;
     }
 
-    const role = normalizeRole(token.payload["custom:role"]);
+    let role = normalizeRole(token.payload["custom:role"]);
+    try {
+      const syncedProfile = await syncUserProfile(profileSyncPayload(token));
+      role = normalizeRole(syncedProfile.role);
+      setProfileSyncError("");
+    } catch (error) {
+      setProfileSyncError(error.message || "Unable to sync your FreshFarm profile");
+    }
     setAuthUser({
       email: token.payload.email,
       role,
@@ -182,20 +204,30 @@ useEffect(() => {
   let active = true;
 
   fetchAuthSession()
-    .then((session) => {
+    .then(async (session) => {
       if (!active) return;
 
       const token = session.tokens?.idToken;
-      const role = normalizeRole(token?.payload["custom:role"]);
+      if (!token) {
+        setAuthUser(null);
+        setPage("shop");
+        return;
+      }
 
-      setAuthUser(
-        token
-          ? {
-              email: token.payload.email,
-              role,
-            }
-          : null
-      );
+      let role = normalizeRole(token.payload["custom:role"]);
+      try {
+        const syncedProfile = await syncUserProfile(profileSyncPayload(token));
+        role = normalizeRole(syncedProfile.role);
+        if (active) setProfileSyncError("");
+      } catch (error) {
+        if (active) {
+          setProfileSyncError(error.message || "Unable to sync your FreshFarm profile");
+        }
+      }
+
+      if (!active) return;
+
+      setAuthUser({ email: token.payload.email, role });
       setPage(role === "farmer" ? "inventory" : "shop");
     })
     .catch(() => {
@@ -696,6 +728,12 @@ return (
         <span>✳</span> Fresh from local farms, delivered closer to home.
         <span className="announcement-right">Buy direct. Support farmers.</span>
       </div>
+
+      {profileSyncError && (
+        <div className="profile-sync-warning" role="alert">
+          Account profile sync failed: {profileSyncError}. Try refreshing the page.
+        </div>
+      )}
 
       {page === "shop" && (
         <main>

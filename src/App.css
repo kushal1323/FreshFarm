@@ -1524,6 +1524,17 @@ textarea:focus-visible {
   text-align: center;
 }
 
+.profile-sync-warning {
+  width: min(1240px, calc(100% - 40px));
+  margin: 16px auto;
+  padding: 13px 16px;
+  border: 1px solid #efcf9f;
+  border-radius: 12px;
+  background: #fff8ea;
+  color: #79501b;
+  font-size: 0.9rem;
+}
+
 .farmer-app .stat-card {
   padding: 23px 25px;
   border-color: #e4ebe2;

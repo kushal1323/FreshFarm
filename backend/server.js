@@ -7,6 +7,7 @@ import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
+import { buildFarmerProfileDefaults, resolveSyncedRole } from './profile_sync.js';
 
 const app = express();
 app.use(cors());
@@ -191,35 +192,62 @@ function getImageUrl(s3Key) {
 
 app.post('/api/users/sync', authenticateTokenOnly, async (req, res) => {
   const verifiedSub = req.tokenPayload.sub;
-  const verifiedEmail = req.tokenPayload.email || req.body.email;
-  const { name, phone, apply_as_farmer, farm_name, farm_description, farm_location } = req.body;
+  const verifiedEmail = req.tokenPayload.email;
+  const name = String(req.tokenPayload.name || req.body.name || verifiedEmail?.split('@')[0] || '').trim();
+  const phone = req.tokenPayload.phone_number || req.body.phone || null;
 
-  if (!name || !verifiedEmail) {
-    return res.status(400).json({ success: false, message: 'name and email are required' });
+  if (!verifiedSub || !verifiedEmail || !name) {
+    return res.status(400).json({ success: false, message: 'A verified Cognito subject, email, and name are required' });
   }
 
-  const conn = await dbPool.getConnection();
+  let conn;
   try {
+    conn = await dbPool.getConnection();
     await conn.beginTransaction();
 
-    const assignedRole = apply_as_farmer ? 'FARMER' : 'CUSTOMER';
+    const cognitoRole = req.tokenPayload['custom:role'];
+    const [existingUsers] = await conn.query(
+      'SELECT id, role FROM users WHERE cognito_sub = ? FOR UPDATE',
+      [verifiedSub]
+    );
+    let userId;
+    let assignedRole;
 
-    await conn.execute(`
-      INSERT INTO users (cognito_sub, name, email, phone, role)
-      VALUES (?, ?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE name = VALUES(name), phone = VALUES(phone)
-    `, [verifiedSub, name, verifiedEmail, phone || null, assignedRole]);
+    if (existingUsers.length > 0) {
+      userId = existingUsers[0].id;
+      assignedRole = resolveSyncedRole(existingUsers[0].role, cognitoRole);
+      await conn.execute(
+        'UPDATE users SET name = ?, phone = COALESCE(?, phone), role = ? WHERE id = ?',
+        [name, phone, assignedRole, userId]
+      );
+    } else {
+      assignedRole = resolveSyncedRole(null, cognitoRole);
+      const [insertResult] = await conn.execute(
+        'INSERT INTO users (cognito_sub, name, email, phone, role) VALUES (?, ?, ?, ?, ?)',
+        [verifiedSub, name, verifiedEmail, phone, assignedRole]
+      );
+      userId = insertResult.insertId;
+    }
+    let farmerProfile = null;
 
-    const [userRows] = await conn.query('SELECT id, role FROM users WHERE cognito_sub = ?', [verifiedSub]);
-    const userId = userRows[0].id;
-
-    // P0: #5 - Set new farmer profiles to 'PENDING', NEVER automatically 'APPROVED'
-    if (apply_as_farmer && farm_name) {
+    if (assignedRole === 'FARMER') {
+      const { farmName, location, description } = buildFarmerProfileDefaults({
+        name,
+        email: verifiedEmail,
+        body: req.body,
+        tokenPayload: req.tokenPayload
+      });
       await conn.execute(`
         INSERT INTO farmer_profiles (user_id, farm_name, description, location, verification_status)
         VALUES (?, ?, ?, ?, 'PENDING')
-        ON DUPLICATE KEY UPDATE farm_name = VALUES(farm_name), description = VALUES(description), location = VALUES(location)
-      `, [userId, farm_name, farm_description || null, farm_location || 'Pending Verification']);
+        ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)
+      `, [userId, farmName, description, location]);
+
+      const [profileRows] = await conn.query(
+        'SELECT id, farm_name, location, verification_status FROM farmer_profiles WHERE user_id = ?',
+        [userId]
+      );
+      farmerProfile = profileRows[0] || null;
     }
 
     await conn.commit();
@@ -227,15 +255,22 @@ app.post('/api/users/sync', authenticateTokenOnly, async (req, res) => {
       success: true,
       user_id: userId,
       role: assignedRole,
-      verification_status: apply_as_farmer ? 'PENDING' : null,
+      farmer_profile: farmerProfile,
+      verification_status: farmerProfile?.verification_status || null,
       message: 'User profile synced successfully'
     });
   } catch (err) {
-    await conn.rollback();
+    if (conn) await conn.rollback();
     console.error('Error syncing profile:', err);
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({
+        success: false,
+        message: 'This verified email is already linked to a different FreshFarm account.'
+      });
+    }
     res.status(500).json({ success: false, error: err.message });
   } finally {
-    conn.release();
+    if (conn) conn.release();
   }
 });
 
