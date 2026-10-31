@@ -48,6 +48,20 @@ export async function syncUserProfile(profile = {}) {
   return result;
 }
 
+export async function getCurrentUserProfile() {
+  const result = await readResponse(
+    await fetch(`${API_BASE_URL}/users/me`, {
+      headers: await authHeaders(),
+    })
+  );
+
+  if (!result.data || !result.data.role) {
+    throw new Error("The API returned an invalid account profile");
+  }
+
+  return result.data;
+}
+
 export async function getBatches() {
   const result = await readResponse(
     await fetch(`${API_BASE_URL}/batches`, {

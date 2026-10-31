@@ -12,6 +12,7 @@ import {
   getFarmerOrders,
   updateFarmerOrderStatus,
   syncUserProfile,
+  getCurrentUserProfile,
 } from "./api";
 import "./App.css";
 import AuthPanel from "./AuthPanel";
@@ -56,6 +57,27 @@ const profileSyncPayload = (token) => {
     farm_description: claims["custom:farm_description"],
   };
 };
+
+async function syncAndResolveAccount(token) {
+  const syncResult = await syncUserProfile(profileSyncPayload(token));
+  const profile = await getCurrentUserProfile();
+  const cognitoRole = normalizeRole(token.payload["custom:role"]);
+  const databaseRole = normalizeRole(profile.role || syncResult.role);
+
+  let role = databaseRole || cognitoRole || "customer";
+  if (databaseRole !== "admin" && (databaseRole === "farmer" || cognitoRole === "farmer")) {
+    role = "farmer";
+  }
+
+  let warning = "";
+  if (cognitoRole === "farmer" && databaseRole === "customer") {
+    warning = "Cognito identifies this account as a farmer, but the FreshFarm database still reports customer. The backend sync service needs updating.";
+  } else if (role === "farmer" && !profile.farmer_profile?.farmer_id) {
+    warning = "This account is recognized as a farmer, but its farmer profile is still missing. Refresh after the backend sync service is updated.";
+  }
+
+  return { role, warning };
+}
 
 const nextOrderStatuses = {
   PLACED: ["CONFIRMED", "CANCELLED"],
@@ -175,9 +197,9 @@ async function refreshAuth() {
 
     let role = normalizeRole(token.payload["custom:role"]);
     try {
-      const syncedProfile = await syncUserProfile(profileSyncPayload(token));
-      role = normalizeRole(syncedProfile.role);
-      setProfileSyncError("");
+      const account = await syncAndResolveAccount(token);
+      role = account.role;
+      setProfileSyncError(account.warning);
     } catch (error) {
       setProfileSyncError(error.message || "Unable to sync your FreshFarm profile");
     }
@@ -216,9 +238,9 @@ useEffect(() => {
 
       let role = normalizeRole(token.payload["custom:role"]);
       try {
-        const syncedProfile = await syncUserProfile(profileSyncPayload(token));
-        role = normalizeRole(syncedProfile.role);
-        if (active) setProfileSyncError("");
+        const account = await syncAndResolveAccount(token);
+        role = account.role;
+        if (active) setProfileSyncError(account.warning);
       } catch (error) {
         if (active) {
           setProfileSyncError(error.message || "Unable to sync your FreshFarm profile");
