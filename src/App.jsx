@@ -7,6 +7,8 @@ import {
   getDocumentDownloadUrl,
   getProducts,
   createOrder,
+  getOrders,
+  getOrderDetails,
 } from "./api";
 import "./App.css";
 import AuthPanel from "./AuthPanel";
@@ -39,14 +41,75 @@ export default function App() {
   const [authUser, setAuthUser] = useState(null);
 const [authLoading, setAuthLoading] = useState(true);
 const [products, setProducts] = useState([]);
-const [productsLoading, setProductsLoading] = useState(true);
-const [productsError, setProductsError] = useState("");
+  async function loadOrders() {
+    setOrdersLoading(true);
+    setOrdersError("");
+
+    try {
+      const data = await getOrders();
+      setOrders(data);
+    } catch (err) {
+      setOrdersError(err.message);
+    } finally {
+      setOrdersLoading(false);
+    }
+  }
+
+  async function toggleOrderDetails(orderId) {
+    if (expandedOrder === orderId) {
+      setExpandedOrder(null);
+      return;
+    }
+
+    setExpandedOrder(orderId);
+
+    if (!orderDetails[orderId]) {
+      try {
+        const details = await getOrderDetails(orderId);
+        setOrderDetails((current) => ({
+          ...current,
+          [orderId]: details,
+        }));
+      } catch (err) {
+        setOrdersError(err.message);
+      }
+    }
+  }
 
 
+const loadProducts = async () => {
+  try {
+    const data = await getProducts();
+
+    setProducts(
+      data.map((product) => ({
+        id: product.id,
+        name: product.name,
+        category: product.category,
+        price: Number(product.price_paise) / 100,
+        unit: product.unit,
+        stock: Number(product.available_quantity) || 0,
+        farmer: product.farmer?.farm_name || "Local farmer",
+        location: product.farmer?.location || "Location unavailable",
+        image:
+          product.image_url ||
+          "https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=700&q=80",
+        description: product.description || "",
+        tag: "",
+      }))
+    );
+  } catch (error) {
+    console.error("Failed to load marketplace products:", error);
+  }
+};
 
 useEffect(() => {
+  let cancelled = false;
+
   getProducts()
     .then((data) => {
+      if (cancelled) return;
+
       setProducts(
         data.map((product) => ({
           id: product.id,
@@ -65,14 +128,13 @@ useEffect(() => {
         }))
       );
     })
-    .catch((err) => {
-      setProductsError(
-        err.message || "Could not load marketplace products"
-      );
-    })
-    .finally(() => {
-      setProductsLoading(false);
+    .catch((error) => {
+      console.error("Failed to load marketplace products:", error);
     });
+
+  return () => {
+    cancelled = true;
+  };
 }, []);
 async function refreshAuth() {
   try {
@@ -142,7 +204,11 @@ useEffect(() => {
   const [customerName, setCustomerName] = useState("");
   const [customerAddress, setCustomerAddress] = useState("");
   const [orderMessage, setOrderMessage] = useState("");
-
+  const [orders, setOrders] = useState([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersError, setOrdersError] = useState("");
+  const [expandedOrder, setExpandedOrder] = useState(null);
+  const [orderDetails, setOrderDetails] = useState({});
   // Existing inventory state
   const [batches, setBatches] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -336,7 +402,7 @@ useEffect(() => {
 
       setMessage(`Inventory added successfully. Batch ID: ${result.batch_id}`);
       setForm(emptyForm);
-      await loadInventory();
+await loadProducts();
     } catch (err) {
       setMessage(`Failed to add inventory: ${err.message}`);
     } finally {
@@ -427,6 +493,18 @@ return (
         </div>
 
         <nav className="header-actions">
+        {authUser.role === "customer" && (
+  <button
+    className={`nav-link ${page === "orders" ? "active" : ""}`}
+    onClick={() => {
+      setPage("orders");
+      setCartOpen(false);
+      loadOrders();
+    }}
+  >
+    My Orders
+  </button>
+)}
           <button
             className={`nav-link ${page === "shop" ? "active" : ""}`}
             onClick={() => {
@@ -436,6 +514,20 @@ return (
           >
             Shop
           </button>
+
+{authUser.role === "customer" && (
+  <button
+    className={`nav-link ${page === "orders" ? "active" : ""}`}
+    onClick={() => {
+      setPage("orders");
+      setCartOpen(false);
+      loadOrders();
+    }}
+  >
+    My Orders
+  </button>
+)}
+
           {authUser.role === "farmer" && (
   <button
     className={`nav-link ${page === "inventory" ? "active" : ""}`}
@@ -596,17 +688,8 @@ return (
             </div>
 
             <div className="product-grid">
-              {productsLoading && (
-  <p className="col-span-full text-center py-8">
-    Loading fresh produce...
-  </p>
-)}
+            
 
-{productsError && (
-  <p className="col-span-full text-center py-8 text-red-500">
-    {productsError}
-  </p>
-)}
               {filteredProducts.map((product) => {
                 const cartItem = cart.find((item) => item.id === product.id);
 
@@ -981,8 +1064,104 @@ return (
           </section>
         </main>
       )}
+        {page === "orders" && (
+        <main className="inventory-page">
+          <section>
+            <div className="section-title-row">
+              <div>
+                <span className="section-eyebrow">CUSTOMER ACCOUNT</span>
+                <h2>My Orders</h2>
+                <p>Track your purchases and view order details.</p>
+              </div>
 
+              <button
+                className="primary-button"
+                onClick={loadOrders}
+                disabled={ordersLoading}
+              >
+                {ordersLoading ? "Refreshing..." : "Refresh"}
+              </button>
+            </div>
+
+            {ordersLoading && <p>Loading your orders...</p>}
+
+            {ordersError && (
+              <p className="notice">{ordersError}</p>
+            )}
+
+            {!ordersLoading && !ordersError && orders.length === 0 && (
+              <p>You haven't placed any orders yet.</p>
+            )}
+
+            <div className="orders-list">
+              {orders.map((order) => (
+                <article className="order-card" key={order.id}>
+                  <div className="section-title-row">
+                    <div>
+                      <h3>Order #{order.id}</h3>
+                      <p>
+                        {new Date(order.created_at).toLocaleString("en-IN")}
+                      </p>
+                    </div>
+
+                    <div>
+                      <strong>{order.order_status}</strong>
+                      <p>{order.payment_status}</p>
+                    </div>
+                  </div>
+
+                  <p>
+                    <strong>Total:</strong>{" "}
+                    {formatPrice(Number(order.total_paise) / 100)}
+                  </p>
+
+                  <p>
+                    <strong>Delivery address:</strong>{" "}
+                    {order.delivery_address}
+                  </p>
+
+                  <button
+                    className="nav-link"
+                    onClick={() => toggleOrderDetails(order.id)}
+                  >
+                    {expandedOrder === order.id
+                      ? "Hide details"
+                      : "View details"}
+                  </button>
+
+                  {expandedOrder === order.id && (
+                    <div>
+                      {!orderDetails[order.id] ? (
+                        <p>Loading order details...</p>
+                      ) : (
+                        <>
+                          <h4>Items</h4>
+                          {orderDetails[order.id].items?.map((item, index) => (
+                            <p key={index}>
+                              {item.product_name} ({item.unit}) × {item.quantity}
+                            </p>
+                          ))}
+
+                          <h4>Order history</h4>
+                          {orderDetails[order.id].history?.map((entry, index) => (
+                            <p key={index}>
+                              {entry.status} —{" "}
+                              {new Date(entry.changed_at).toLocaleString("en-IN")}
+                              {entry.notes ? ` (${entry.notes})` : ""}
+                            </p>
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
+          </section>
+        </main>
+      )}
       {cartOpen && (
+        
         <div
           className="drawer-backdrop"
           onClick={() => setCartOpen(false)}
