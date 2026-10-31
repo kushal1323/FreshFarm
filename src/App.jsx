@@ -6,6 +6,7 @@ import {
   linkDocumentToBatch,
   getDocumentDownloadUrl,
   getProducts,
+  createOrder,
 } from "./api";
 import "./App.css";
 import AuthPanel from "./AuthPanel";
@@ -287,25 +288,38 @@ useEffect(() => {
     setCart((current) => current.filter((item) => item.id !== productId));
   }
 
-  function handleDemoCheckout(event) {
+    async function handleDemoCheckout(event) {
     event.preventDefault();
 
     if (!cart.length || !customerName.trim() || !customerAddress.trim()) {
       return;
     }
 
-    const demoOrderId = `FF-${Date.now().toString().slice(-8)}`;
+    setOrderMessage("Placing your order...");
 
-    setOrderMessage(
-      `Demo order ${demoOrderId} created for ${customerName}. No payment was taken and no real order was sent to the backend.`
-    );
-    setCart([]);
-    setCheckoutOpen(false);
-    setCartOpen(false);
-    setCustomerName("");
-    setCustomerAddress("");
-    setPage("shop");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    try {
+      const result = await createOrder({
+        items: cart.map((item) => ({
+          product_id: item.id,
+          quantity: item.quantity,
+        })),
+        delivery_address: `${customerName.trim()}, ${customerAddress.trim()}`,
+      });
+
+      setOrderMessage(
+        `Order #${result.order_id} placed successfully!`
+      );
+
+      setCart([]);
+      setCheckoutOpen(false);
+      setCartOpen(false);
+      setCustomerName("");
+      setCustomerAddress("");
+      setPage("shop");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (err) {
+      setOrderMessage(`Order failed: ${err.message}`);
+    }
   }
 
   async function handleAddBatch(event) {

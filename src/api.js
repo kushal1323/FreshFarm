@@ -132,3 +132,20 @@ export async function getDocumentDownloadUrl(key) {
 
   return result.downloadUrl;
 }
+export async function createOrder(orderData) {
+  const result = await readResponse(
+    await fetch(`${API_BASE_URL}/orders`, {
+      method: "POST",
+      headers: await authHeaders({
+        "Content-Type": "application/json",
+      }),
+      body: JSON.stringify(orderData),
+    })
+  );
+
+  if (!result.success) {
+    throw new Error(result.message || "Could not place order");
+  }
+
+  return result;
+}
