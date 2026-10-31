@@ -7,6 +7,16 @@ export function resolveSyncedRole(existingRole, cognitoRole) {
   return 'CUSTOMER';
 }
 
+export function isVerifiedEmailClaim(value) {
+  return value === true || value === 'true';
+}
+
+export function farmerProfileVerificationStatus(role, emailVerified) {
+  return String(role || '').trim().toUpperCase() === 'FARMER' && isVerifiedEmailClaim(emailVerified)
+    ? 'APPROVED'
+    : 'PENDING';
+}
+
 function firstText(...values) {
   return values.find(value => typeof value === 'string' && value.trim())?.trim() || '';
 }

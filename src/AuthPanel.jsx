@@ -31,9 +31,18 @@ const [showPassword, setShowPassword] = useState(false);
           confirmationCode: code,
         });
 
-        setMessage("Account verified. You can now sign in.");
         setStep("form");
         setMode("login");
+
+        // A confirmed account can sign in now. The authenticated profile sync
+        // uses Cognito's email_verified claim to approve farmer profiles.
+        const result = await signIn({ username: email, password });
+        if (result.isSignedIn) {
+          await onLogin();
+          setMessage("Email verified and your account is ready.");
+        } else {
+          setMessage("Email verified. Sign in to finish setting up your account.");
+        }
         return;
       }
 

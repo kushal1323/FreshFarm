@@ -7,7 +7,12 @@ import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
-import { buildFarmerProfileDefaults, resolveSyncedRole } from './profile_sync.js';
+import {
+  buildFarmerProfileDefaults,
+  farmerProfileVerificationStatus,
+  isVerifiedEmailClaim,
+  resolveSyncedRole
+} from './profile_sync.js';
 
 const app = express();
 app.use(cors());
@@ -220,6 +225,10 @@ app.post('/api/users/sync', authenticateTokenOnly, async (req, res) => {
   const name = String(req.tokenPayload.name || req.body.name || verifiedEmail?.split('@')[0] || '').trim();
   const phone = req.tokenPayload.phone_number || req.body.phone || null;
 
+  if (!isVerifiedEmailClaim(req.tokenPayload.email_verified)) {
+    return res.status(403).json({ success: false, message: 'Verify your email before syncing your FreshFarm profile' });
+  }
+
   if (!verifiedSub || !verifiedEmail || !name) {
     return res.status(400).json({ success: false, message: 'A verified Cognito subject, email, and name are required' });
   }
@@ -263,9 +272,15 @@ app.post('/api/users/sync', authenticateTokenOnly, async (req, res) => {
       });
       await conn.execute(`
         INSERT INTO farmer_profiles (user_id, farm_name, description, location, verification_status)
-        VALUES (?, ?, ?, ?, 'PENDING')
-        ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)
-      `, [userId, farmName, description, location]);
+        VALUES (?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE verification_status = VALUES(verification_status)
+      `, [
+        userId,
+        farmName,
+        description,
+        location,
+        farmerProfileVerificationStatus(assignedRole, req.tokenPayload.email_verified)
+      ]);
 
       const [profileRows] = await conn.query(
         'SELECT id, farm_name, location, verification_status FROM farmer_profiles WHERE user_id = ?',
@@ -436,7 +451,7 @@ app.get('/api/products', async (req, res) => {
       FROM products p
       JOIN farmer_profiles fp ON p.farmer_id = fp.id
       LEFT JOIN batches b ON p.id = b.product_id
-      WHERE p.is_active = 1 AND fp.verification_status = 'APPROVED'
+      WHERE p.is_active = 1
     `;
     const params = [];
 
@@ -482,7 +497,7 @@ app.get('/api/products/:id', async (req, res) => {
         fp.id AS farmer_id, fp.farm_name
       FROM products p
       JOIN farmer_profiles fp ON p.farmer_id = fp.id
-      WHERE p.id = ? AND p.is_active = 1 AND fp.verification_status = 'APPROVED'
+      WHERE p.id = ? AND p.is_active = 1
     `, [id]);
 
     if (productRows.length === 0) {
@@ -531,14 +546,14 @@ app.post('/api/farmer/products', authenticateUser, requireRole('FARMER', 'ADMIN'
 
   try {
     const [farmer] = await dbPool.query(
-      'SELECT id, verification_status FROM farmer_profiles WHERE user_id = ?',
+      'SELECT id FROM farmer_profiles WHERE user_id = ?',
       [req.user.id]
     );
 
-    if (farmer.length === 0 || farmer[0].verification_status !== 'APPROVED') {
+    if (farmer.length === 0) {
       return res.status(403).json({
         success: false,
-        message: 'Only approved farmers can publish products. Your profile status is PENDING or unverified.'
+        message: 'Farmer profile not found'
       });
     }
 
@@ -618,7 +633,7 @@ app.post('/api/orders', authenticateUser, requireRole('CUSTOMER'), async (req, r
         `SELECT p.id, p.price_paise, p.is_active
          FROM products p
          JOIN farmer_profiles fp ON fp.id = p.farmer_id
-         WHERE p.id = ? AND fp.verification_status = 'APPROVED'`,
+         WHERE p.id = ?`,
         [product_id]
       );
 
